@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+/* Design tokens. Both UI agents style against these rather than hard-coding colours,
+   so the timer, task list, and stats pages read as one product. Dark is the default
+   look for a focus app; light follows the OS. */
+@theme {
+  --color-surface: #0f1115;
+  --color-surface-raised: #171a21;
+  --color-surface-sunken: #0a0c10;
+  --color-border: #262b36;
+  --color-text: #e7e9ee;
+  --color-text-muted: #949bab;
+
+  --color-focus: #6366f1;
+  --color-break: #10b981;
+  --color-danger: #f43f5e;
+
+  --color-p1: #f43f5e;
+  --color-p2: #f59e0b;
+  --color-p3: #3b82f6;
+  --color-p4: #6b7280;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-family:
+      'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* The whole app is a desktop chrome, not a document — text selection on labels and
+     buttons just looks like a bug. Inputs opt back in below. */
+  body {
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable] {
+    user-select: text;
+  }
+
+  /* Digits in a countdown must not reflow as they change. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

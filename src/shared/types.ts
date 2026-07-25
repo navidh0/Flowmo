@@ -157,7 +157,11 @@ export const DEFAULT_SETTINGS: Settings = {
   showMiniWidget: false,
   theme: 'system',
 
-  hotkeyStartPause: 'Control+Alt+Space',
+  // Control+Alt+Space is the obvious choice and was the original default, but it is
+  // already claimed on Windows (IME / Office bindings) — verified by probing
+  // globalShortcut.register(), which returns false rather than throwing. A default that
+  // silently never fires is worse than an unfamiliar one, so P/S it is.
+  hotkeyStartPause: 'Control+Alt+P',
   hotkeySkip: 'Control+Alt+S',
 
   sleepGraceMs: 2 * 60_000

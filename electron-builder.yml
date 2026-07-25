@@ -1,0 +1,45 @@
+appId: io.flowdo.app
+productName: Flowdo
+copyright: Copyright © 2026 Navid
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - out/**
+  - package.json
+
+# Nothing in this app is a native module — SQLite comes from Node's builtin
+# node:sqlite — so there is no rebuild step to run and no C++ toolchain needed.
+npmRebuild: false
+asar: true
+
+publish: null
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  # A real installer with a directory choice, not a one-click that drops the app in
+  # AppData without asking.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Flowdo
+  artifactName: ${productName}-Setup-${version}.${ext}
+  # Leave the user's focus history in %APPDATA%\Flowdo on uninstall — deleting
+  # somebody's time-tracking data because they uninstalled once is not recoverable.
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}

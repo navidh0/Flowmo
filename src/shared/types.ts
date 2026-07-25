@@ -319,7 +319,13 @@ export interface ProjectBucket {
 export interface FlowdoApi {
   timer: {
     getState(): Promise<TimerState>
-    /** Starts focus if idle; resumes if paused. */
+    /**
+     * Starts focus if idle (or the armed phase, if one is waiting); resumes if paused.
+     *
+     * `taskId` omitted keeps the current task; an explicit `null` CLEARS it. These are not
+     * interchangeable — treating an omitted argument as null detaches the task and logs
+     * the session against nothing.
+     */
     start(taskId?: number | null): Promise<TimerState>
     pause(): Promise<TimerState>
     resume(): Promise<TimerState>

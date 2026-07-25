@@ -39,7 +39,10 @@ export interface IpcContext {
 export function registerIpcHandlers(ctx: IpcContext): void {
   // ── timer ──
   ipcMain.handle(CH.timer.getState, () => ctx.timer.getState())
-  ipcMain.handle(CH.timer.start, (_e, taskId: number | null) => ctx.timer.start(taskId))
+  // Deliberately `number | null | undefined`: an omitted argument keeps the current task,
+  // an explicit null clears it. Widening this to `number | null` would erase the
+  // distinction the timer service depends on.
+  ipcMain.handle(CH.timer.start, (_e, taskId?: number | null) => ctx.timer.start(taskId))
   ipcMain.handle(CH.timer.pause, () => ctx.timer.pause())
   ipcMain.handle(CH.timer.resume, () => ctx.timer.resume())
   ipcMain.handle(CH.timer.takeBreak, () => ctx.timer.takeBreak())

@@ -35,7 +35,14 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: FlowdoApi = {
   timer: {
     getState: () => ipcRenderer.invoke(CH.timer.getState),
-    start: (taskId?: number | null) => ipcRenderer.invoke(CH.timer.start, taskId ?? null),
+    // `undefined` and `null` are NOT interchangeable here: main reads an omitted argument
+    // as "keep the current task" and an explicit null as "clear it". Collapsing them with
+    // `?? null` made a plain start() silently detach the task and log the session against
+    // nothing. Forward the omission by not passing the argument at all.
+    start: (taskId?: number | null) =>
+      taskId === undefined
+        ? ipcRenderer.invoke(CH.timer.start)
+        : ipcRenderer.invoke(CH.timer.start, taskId),
     pause: () => ipcRenderer.invoke(CH.timer.pause),
     resume: () => ipcRenderer.invoke(CH.timer.resume),
     takeBreak: () => ipcRenderer.invoke(CH.timer.takeBreak),

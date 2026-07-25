@@ -1,41 +1,72 @@
 /**
- * Shell and routing. Owned by the integration layer — the UI agents own the components
- * under `components/`, this file only composes them.
- *
- * Wave 0 scope: proves the preload bridge and Tailwind pipeline work. Replaced with the
- * real shell (sidebar + timer + tasks + stats) as Wave 2 lands.
+ * Shell and routing. Owned by the integration layer — the feature agents own everything
+ * under `components/`, this file only composes them and connects the two surfaces.
  */
 
 import { useEffect, useState } from 'react'
-import { computeEarnedBreakMs } from '@shared/timer-math'
-import { DEFAULT_SETTINGS } from '@shared/types'
-import { formatClock, formatDuration } from './lib/format'
+import { MiniWidget } from './components/mini'
+import { ProjectSidebar, TasksPanel } from './components/tasks'
+import { TimerPanel } from './components/timer'
+import { useTasksStore } from './stores/tasks'
+import { useTimerStore, useTimerSync } from './stores/timer'
 
-export default function App(): React.JSX.Element {
-  const [version, setVersion] = useState<string>('…')
-  const [isMini, setIsMini] = useState<boolean | null>(null)
+/**
+ * The mini widget is a second BrowserWindow loading the same bundle at `#/mini`
+ * (see `main/windows.ts`). Reading the hash is enough of a router for two routes; pulling
+ * in react-router to distinguish them would be a dependency for nothing.
+ */
+function useIsMiniRoute(): boolean {
+  const [isMini, setIsMini] = useState(() => window.location.hash.startsWith('#/mini'))
 
   useEffect(() => {
-    void window.flowdo.app.getVersion().then(setVersion)
-    void window.flowdo.app.isMiniWindow().then(setIsMini)
+    const onHashChange = (): void => setIsMini(window.location.hash.startsWith('#/mini'))
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  // Sanity check that shared/ is reachable from the renderer and the math is sane:
-  // 50 minutes of focus should earn a 10-minute break.
-  const earned = computeEarnedBreakMs(50 * 60_000, DEFAULT_SETTINGS)
+  return isMini
+}
+
+/**
+ * A finished focus session changes `actualPomodoros` and `focusMs` server-side, and the
+ * task list has no way to know. Without this the row you just worked against keeps showing
+ * its pre-session counts until something else happens to refresh it.
+ */
+function useRefreshTasksOnPhaseEnd(): void {
+  const lastPhaseEnd = useTimerStore((s) => s.lastPhaseEnd)
+
+  useEffect(() => {
+    if (lastPhaseEnd?.kind !== 'focus') return
+    void useTasksStore.getState().refreshTasks()
+  }, [lastPhaseEnd])
+}
+
+export default function App(): React.JSX.Element {
+  const isMini = useIsMiniRoute()
+  useTimerSync()
+
+  if (isMini) return <MiniWidget />
+  return <MainShell />
+}
+
+function MainShell(): React.JSX.Element {
+  useRefreshTasksOnPhaseEnd()
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3">
-      <div className="text-4xl font-semibold tracking-tight tabular">
-        {formatClock(25 * 60_000)}
-      </div>
-      <div className="text-sm text-[var(--color-text-muted)]">
-        Flowdo v{version} · bridge {isMini === null ? 'pending' : 'ok'} · mini={String(isMini)}
-      </div>
-      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
-        50m focus earns {formatDuration(earned)} break (divisor{' '}
-        {DEFAULT_SETTINGS.flowmodoroDivisor})
-      </div>
+    <div className="flex h-full min-h-0 bg-[var(--color-surface)]">
+      <aside className="w-52 shrink-0 border-r border-[var(--color-border)]">
+        <ProjectSidebar />
+      </aside>
+
+      {/* The timer is the centrepiece, so it gets a fixed, generous column rather than
+          competing with the task list for width as the window resizes. */}
+      <section className="flex w-[23rem] shrink-0 flex-col border-r border-[var(--color-border)]">
+        <TimerPanel />
+      </section>
+
+      <main className="min-w-0 flex-1">
+        <TasksPanel />
+      </main>
     </div>
   )
 }

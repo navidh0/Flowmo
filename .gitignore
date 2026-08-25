@@ -5,3 +5,12 @@ release/
 *.log
 .DS_Store
 .vite/
+
+# Local tooling. None of this is part of the shipped app, and it is deliberately
+# kept out of the public repo. docs/ROADMAP.md is the tracked project roadmap;
+# the working plans under .claude/plans/ hold the execution detail.
+.claude/
+CLAUDE.md
+scratchpad/
+
+# Local rewrite safety net (see .claude/plans/). Never pushed.

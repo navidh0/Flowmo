@@ -213,6 +213,99 @@ describe('validateExport', () => {
   })
 })
 
+describe('sync origin (source/externalId)', () => {
+  /** Strip a field from every row of a table, the way a v0.2.0 export would lack it. */
+  function omit(rows: Array<Record<string, unknown>>, field: string): Array<Record<string, unknown>> {
+    return rows.map((row) => {
+      const copy = { ...row }
+      delete copy[field]
+      return copy
+    })
+  }
+
+  it('imports a v0.2.0-shaped file lacking source/externalId/recurring/remoteDeletedAt entirely', () => {
+    seed()
+    const before = buildExport()
+    const legacy = structuredClone(before) as unknown as Record<string, unknown>
+    legacy.projects = omit(omit(legacy.projects as Array<Record<string, unknown>>, 'source'), 'externalId')
+    legacy.tasks = omit(
+      omit(
+        omit(omit(legacy.tasks as Array<Record<string, unknown>>, 'source'), 'externalId'),
+        'recurring'
+      ),
+      'remoteDeletedAt'
+    )
+    legacy.subtasks = omit(
+      omit(legacy.subtasks as Array<Record<string, unknown>>, 'source'),
+      'externalId'
+    )
+
+    const validated = validateExport(legacy)
+    expect(validated.projects.every((p) => p.source === null && p.externalId === null)).toBe(true)
+    expect(validated.tasks.every((t) => t.source === null && t.externalId === null)).toBe(true)
+    expect(validated.subtasks.every((s) => s.source === null && s.externalId === null)).toBe(true)
+
+    expect(() => applyImport(validated)).not.toThrow()
+    const after = buildExport()
+    expect(after.tasks.every((t) => t.source === null)).toBe(true)
+  })
+
+  it('rejects a source outside the SyncSource union, leaving the DB untouched', () => {
+    seed()
+    const before = buildExport()
+    const bad = structuredClone(before) as unknown as Record<string, unknown>
+    const tasks = bad.tasks as Array<Record<string, unknown>>
+    tasks[0]!.source = 'asana'
+    tasks[0]!.externalId = '123'
+
+    expect(() => validateExport(bad)).toThrow(/source/)
+    expect(buildExport()).toMatchObject({ ...before, exportedAt: expect.any(Number) })
+  })
+
+  it('rejects source set without externalId (or vice versa), leaving the DB untouched', () => {
+    seed()
+    const before = buildExport()
+    const bad = structuredClone(before) as unknown as Record<string, unknown>
+    const tasks = bad.tasks as Array<Record<string, unknown>>
+    tasks[0]!.source = 'todoist'
+    tasks[0]!.externalId = null
+
+    expect(() => validateExport(bad)).toThrow(/must both be null or both be non-null/)
+    expect(buildExport()).toMatchObject({ ...before, exportedAt: expect.any(Number) })
+  })
+
+  it('rejects a duplicate (source, externalId) pair within a table, leaving the DB untouched', () => {
+    seed()
+    const before = buildExport()
+    const bad = structuredClone(before) as unknown as Record<string, unknown>
+    const tasks = bad.tasks as Array<Record<string, unknown>>
+    tasks[0]!.source = 'todoist'
+    tasks[0]!.externalId = '123'
+    // A second task claims the same upstream row.
+    tasks.push({ ...tasks[0], id: 999_001, source: 'todoist', externalId: '123' })
+
+    expect(() => validateExport(bad)).toThrow(/duplicated/)
+    expect(buildExport()).toMatchObject({ ...before, exportedAt: expect.any(Number) })
+  })
+})
+
+describe('credentials never leak into an export', () => {
+  it('an export never contains the credentials table even when it holds rows', () => {
+    seed()
+    // Inserted directly — nothing in the app writes to `credentials` yet (that lands with
+    // the sync engine), but the table exists from migration v2 and must be unreachable from
+    // export regardless.
+    getDb()
+      .prepare('INSERT INTO credentials (key, ciphertext, updated_at) VALUES (?, ?, ?)')
+      .run('todoist.token', Buffer.from('super-secret-ciphertext'), Date.now())
+
+    const json = JSON.stringify(buildExport())
+    expect(json).not.toMatch(/ciphertext/i)
+    expect(json).not.toMatch(/credentials/i)
+    expect(json).not.toMatch(/super-secret-ciphertext/)
+  })
+})
+
 describe('settings on import', () => {
   it('drops a settings key that is not in DEFAULT_SETTINGS rather than storing it', () => {
     seed()

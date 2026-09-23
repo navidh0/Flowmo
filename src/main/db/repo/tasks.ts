@@ -1,5 +1,17 @@
 import type { Priority, TaskCreate, TaskUpdate, TaskWithStats } from '@shared/types'
-import { getDb, num, numOrNull, rowId, scalarNum, str, strOrNull, tx, type Row } from '../index'
+import {
+  getDb,
+  isRecurring,
+  num,
+  numOrNull,
+  rowId,
+  scalarNum,
+  str,
+  strOrNull,
+  syncSourceOrNull,
+  tx,
+  type Row
+} from '../index'
 
 /**
  * Tasks are always read with their derived counts attached, via two pre-grouped
@@ -13,6 +25,7 @@ const SELECT_TASKS = `
   SELECT
     t.id, t.project_id, t.title, t.notes, t.priority, t.due_date,
     t.estimated_pomodoros, t.sort_order, t.completed_at, t.created_at,
+    t.source, t.external_id, t.remote_due, t.remote_deleted_at,
     COALESCE(f.session_count, 0) AS actual_pomodoros,
     COALESCE(f.focus_ms, 0)      AS focus_ms,
     COALESCE(s.subtask_total, 0) AS subtask_total,
@@ -57,6 +70,10 @@ function mapTask(row: Row): TaskWithStats {
     sortOrder: num(row, 'sort_order'),
     completedAt: numOrNull(row, 'completed_at'),
     createdAt: num(row, 'created_at'),
+    source: syncSourceOrNull(row, 'source'),
+    externalId: strOrNull(row, 'external_id'),
+    recurring: isRecurring(strOrNull(row, 'remote_due')),
+    remoteDeletedAt: numOrNull(row, 'remote_deleted_at'),
     actualPomodoros: num(row, 'actual_pomodoros'),
     focusMs: num(row, 'focus_ms'),
     subtaskTotal: num(row, 'subtask_total'),

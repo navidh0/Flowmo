@@ -12,12 +12,16 @@ import type { IpcRendererEvent } from 'electron'
 import { CH, EV } from '@shared/channels'
 import type {
   FlowdoApi,
+  CalendarFeedCreate,
+  CalendarFeedUpdate,
+  DataChangedScope,
   HotkeyFailure,
   OnRunningSession,
   PhaseEndEvent,
   ProjectCreate,
   ProjectUpdate,
   Settings,
+  TodoistStatus,
   StatsRange,
   SubtaskCreate,
   SubtaskUpdate,
@@ -75,7 +79,8 @@ const api: FlowdoApi = {
     setCompleted: (id: number, completed: boolean) =>
       ipcRenderer.invoke(CH.tasks.setCompleted, id, completed),
     reorder: (ids: number[]) => ipcRenderer.invoke(CH.tasks.reorder, ids),
-    remove: (id: number) => ipcRenderer.invoke(CH.tasks.remove, id)
+    remove: (id: number) => ipcRenderer.invoke(CH.tasks.remove, id),
+    keepLocal: (id: number) => ipcRenderer.invoke(CH.tasks.keepLocal, id)
   },
 
   subtasks: {
@@ -115,7 +120,37 @@ const api: FlowdoApi = {
       subscribe(EV.hotkeyFailures, cb),
     getHotkeyFailures: () => ipcRenderer.invoke(CH.system.getHotkeyFailures),
     probeHotkey: (accelerator: string) =>
-      ipcRenderer.invoke(CH.system.probeHotkey, accelerator)
+      ipcRenderer.invoke(CH.system.probeHotkey, accelerator),
+    suspendHotkeys: (suspended: boolean) =>
+      ipcRenderer.invoke(CH.system.suspendHotkeys, suspended)
+  },
+
+  integrations: {
+    todoist: {
+      status: () => ipcRenderer.invoke(CH.todoist.status),
+      connect: (token: string) => ipcRenderer.invoke(CH.todoist.connect, token),
+      disconnect: () => ipcRenderer.invoke(CH.todoist.disconnect),
+      syncNow: () => ipcRenderer.invoke(CH.todoist.syncNow),
+      onStatus: (cb: (status: TodoistStatus) => void) => subscribe(EV.todoistStatus, cb)
+    },
+    calendars: {
+      list: () => ipcRenderer.invoke(CH.calendars.list),
+      add: (feed: CalendarFeedCreate) => ipcRenderer.invoke(CH.calendars.add, feed),
+      update: (id: number, patch: CalendarFeedUpdate) =>
+        ipcRenderer.invoke(CH.calendars.update, id, patch),
+      remove: (id: number) => ipcRenderer.invoke(CH.calendars.remove, id),
+      refreshNow: () => ipcRenderer.invoke(CH.calendars.refreshNow),
+      secureStorageAvailable: () => ipcRenderer.invoke(CH.calendars.secureStorageAvailable)
+    }
+  },
+
+  calendar: {
+    eventsRange: (fromMs: number, toMs: number) =>
+      ipcRenderer.invoke(CH.calendar.eventsRange, fromMs, toMs)
+  },
+
+  events: {
+    onDataChanged: (cb: (scope: DataChangedScope) => void) => subscribe(EV.dataChanged, cb)
   },
 
   app: {

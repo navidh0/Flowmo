@@ -13,6 +13,7 @@
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
+import type { SyncSource } from '@shared/types'
 import { runMigrations } from './migrations'
 
 let handle: DatabaseSync | null = null
@@ -139,4 +140,40 @@ export function toInt(value: boolean): number {
 /** `lastInsertRowid` is `number | bigint`; ids cross IPC as plain numbers. */
 export function rowId(value: number | bigint): number {
   return typeof value === 'bigint' ? Number(value) : value
+}
+
+/** Every known sync source. An unrecognised stored value maps to `null`, never throws. */
+const SYNC_SOURCES: readonly SyncSource[] = ['todoist']
+
+/**
+ * Read a `source` column as the `SyncSource` union or `null`.
+ *
+ * A stored value outside the union (e.g. left over from a removed integration, or a stray
+ * hand-edit) degrades to `null` rather than reaching the app as an unknown string — the
+ * same "wrong shape degrades to default" policy `settingsRepo.get()` applies.
+ */
+export function syncSourceOrNull(row: Row, key: string): SyncSource | null {
+  const value = row[key]
+  if (value === null || value === undefined) return null
+  const s = str(row, key)
+  return (SYNC_SOURCES as readonly string[]).includes(s) ? (s as SyncSource) : null
+}
+
+/**
+ * A task recurs upstream iff `remote_due` holds JSON whose `is_recurring` is `true`.
+ *
+ * Malformed or unexpected JSON must never throw here — this runs on every task read, and a
+ * provider payload that does not parse the way we expect must degrade to "not recurring",
+ * not crash the task list.
+ */
+export function isRecurring(remoteDue: string | null): boolean {
+  if (remoteDue === null) return false
+  try {
+    const parsed: unknown = JSON.parse(remoteDue)
+    if (typeof parsed !== 'object' || parsed === null) return false
+    const record = parsed as Record<string, unknown>
+    return record.is_recurring === true
+  } catch {
+    return false
+  }
 }

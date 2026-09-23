@@ -1,5 +1,16 @@
 import type { Project, ProjectCreate, ProjectUpdate } from '@shared/types'
-import { bool, getDb, num, rowId, scalarNum, str, toInt, type Row } from '../index'
+import {
+  bool,
+  getDb,
+  num,
+  rowId,
+  scalarNum,
+  str,
+  strOrNull,
+  syncSourceOrNull,
+  toInt,
+  type Row
+} from '../index'
 
 /**
  * New projects cycle through this so two projects created back to back never share a
@@ -17,7 +28,7 @@ const PALETTE = [
   '#84cc16'
 ] as const
 
-const COLUMNS = 'id, name, color, archived, sort_order, created_at'
+const COLUMNS = 'id, name, color, archived, sort_order, created_at, source, external_id'
 
 function mapProject(row: Row): Project {
   return {
@@ -26,7 +37,9 @@ function mapProject(row: Row): Project {
     color: str(row, 'color'),
     archived: bool(row, 'archived'),
     sortOrder: num(row, 'sort_order'),
-    createdAt: num(row, 'created_at')
+    createdAt: num(row, 'created_at'),
+    source: syncSourceOrNull(row, 'source'),
+    externalId: strOrNull(row, 'external_id')
   }
 }
 

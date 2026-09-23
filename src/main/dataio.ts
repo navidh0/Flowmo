@@ -35,21 +35,33 @@ import type {
   SessionKind,
   Settings,
   Subtask,
+  SyncSource,
   Task,
   TimerMode
 } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import { bool, getDb, num, numOrNull, str, strOrNull, toInt, tx, type Row } from './db'
+import {
+  bool,
+  getDb,
+  num,
+  numOrNull,
+  str,
+  strOrNull,
+  syncSourceOrNull,
+  toInt,
+  tx,
+  type Row
+} from './db'
 import * as settingsRepo from './db/repo/settings'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Column lists — explicit and named, never `SELECT *`. See module doc.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PROJECTS_COLUMNS = 'id, name, color, archived, sort_order, created_at'
+const PROJECTS_COLUMNS = 'id, name, color, archived, sort_order, created_at, source, external_id'
 const TASKS_COLUMNS =
-  'id, project_id, title, notes, priority, due_date, estimated_pomodoros, sort_order, completed_at, created_at'
-const SUBTASKS_COLUMNS = 'id, task_id, title, done, sort_order'
+  'id, project_id, title, notes, priority, due_date, estimated_pomodoros, sort_order, completed_at, created_at, source, external_id'
+const SUBTASKS_COLUMNS = 'id, task_id, title, done, sort_order, source, external_id'
 const SESSIONS_COLUMNS = `
   id, task_id, project_id, mode, kind, started_at, ended_at,
   planned_ms, actual_ms, completed, interrupted, notes
@@ -101,10 +113,18 @@ function mapProject(row: Row): Project {
     color: str(row, 'color'),
     archived: bool(row, 'archived'),
     sortOrder: num(row, 'sort_order'),
-    createdAt: num(row, 'created_at')
+    createdAt: num(row, 'created_at'),
+    source: syncSourceOrNull(row, 'source'),
+    externalId: strOrNull(row, 'external_id')
   }
 }
 
+/**
+ * `recurring` and `remoteDeletedAt` are fixed placeholders here, never read off
+ * `remote_due`/`remote_deleted_at` — those sync-bookkeeping columns deliberately never
+ * appear in an export (see module doc). The fields exist only so this object satisfies the
+ * `Task` shape; `validateExport` does not require them on the way back in.
+ */
 function mapTask(row: Row): Task {
   return {
     id: num(row, 'id'),
@@ -116,7 +136,11 @@ function mapTask(row: Row): Task {
     estimatedPomodoros: numOrNull(row, 'estimated_pomodoros'),
     sortOrder: num(row, 'sort_order'),
     completedAt: numOrNull(row, 'completed_at'),
-    createdAt: num(row, 'created_at')
+    createdAt: num(row, 'created_at'),
+    source: syncSourceOrNull(row, 'source'),
+    externalId: strOrNull(row, 'external_id'),
+    recurring: false,
+    remoteDeletedAt: null
   }
 }
 
@@ -126,7 +150,9 @@ function mapSubtask(row: Row): Subtask {
     taskId: num(row, 'task_id'),
     title: str(row, 'title'),
     done: bool(row, 'done'),
-    sortOrder: num(row, 'sort_order')
+    sortOrder: num(row, 'sort_order'),
+    source: syncSourceOrNull(row, 'source'),
+    externalId: strOrNull(row, 'external_id')
   }
 }
 
@@ -253,7 +279,69 @@ function checkDueDate(value: unknown, table: string, index: number, field: strin
   }
 }
 
-function validateProjectRow(row: unknown, index: number, seenIds: Set<number>): Project {
+const SYNC_SOURCES: readonly SyncSource[] = ['todoist']
+
+/**
+ * `source`/`externalId` are optional in the file — a v0.2.0 export predates them entirely,
+ * so their absence must import cleanly as `null`/`null`. When present, both validate
+ * strictly: an import file is user-editable in a way the live DB is not, so an unknown
+ * source here is rejected outright rather than degraded to `null` the way a corrupted
+ * stored value is in the repos (`syncSourceOrNull`). Never both set for the same
+ * (source, externalId) twice within a table — that would mean two rows claiming to mirror
+ * the same upstream item.
+ */
+function checkSyncOrigin(
+  r: Record<string, unknown>,
+  table: string,
+  index: number,
+  seenPairs: Set<string>
+): { source: SyncSource | null; externalId: string | null } {
+  const rawSource = r.source ?? null
+  const rawExternalId = r.externalId ?? null
+
+  let source: SyncSource | null = null
+  if (rawSource !== null) {
+    if (typeof rawSource !== 'string' || !SYNC_SOURCES.includes(rawSource as SyncSource)) {
+      fail(
+        table,
+        index,
+        `'source' must be null or one of ${SYNC_SOURCES.join(', ')}, got ${JSON.stringify(rawSource)}`
+      )
+    }
+    source = rawSource as SyncSource
+  }
+
+  let externalId: string | null = null
+  if (rawExternalId !== null) {
+    checkString(rawExternalId, table, index, 'externalId')
+    externalId = rawExternalId as string
+  }
+
+  if ((source === null) !== (externalId === null)) {
+    fail(table, index, `'source' and 'externalId' must both be null or both be non-null`)
+  }
+
+  if (source !== null && externalId !== null) {
+    const key = `${source}\u0000${externalId}`
+    if (seenPairs.has(key)) {
+      fail(
+        table,
+        index,
+        `(source, externalId) pair (${source}, ${externalId}) is duplicated within ${table}`
+      )
+    }
+    seenPairs.add(key)
+  }
+
+  return { source, externalId }
+}
+
+function validateProjectRow(
+  row: unknown,
+  index: number,
+  seenIds: Set<number>,
+  seenSyncPairs: Set<string>
+): Project {
   if (!isRecord(row)) fail('projects', index, 'must be an object')
   const r = row as Record<string, unknown>
 
@@ -268,7 +356,9 @@ function validateProjectRow(row: unknown, index: number, seenIds: Set<number>): 
   checkFiniteInt(r.sortOrder, 'projects', index, 'sortOrder')
   checkFiniteInt(r.createdAt, 'projects', index, 'createdAt')
 
-  return r as unknown as Project
+  const { source, externalId } = checkSyncOrigin(r, 'projects', index, seenSyncPairs)
+
+  return { ...(r as unknown as Project), source, externalId }
 }
 
 const PRIORITIES: readonly Priority[] = [1, 2, 3, 4]
@@ -277,7 +367,8 @@ function validateTaskRow(
   row: unknown,
   index: number,
   seenIds: Set<number>,
-  projectIds: ReadonlySet<number>
+  projectIds: ReadonlySet<number>,
+  seenSyncPairs: Set<string>
 ): Task {
   if (!isRecord(row)) fail('tasks', index, 'must be an object')
   const r = row as Record<string, unknown>
@@ -303,14 +394,19 @@ function validateTaskRow(
   checkNullableFiniteInt(r.completedAt, 'tasks', index, 'completedAt')
   checkFiniteInt(r.createdAt, 'tasks', index, 'createdAt')
 
-  return r as unknown as Task
+  const { source, externalId } = checkSyncOrigin(r, 'tasks', index, seenSyncPairs)
+
+  // `recurring`/`remoteDeletedAt` are never trusted from the file — see mapTask's doc.
+  // Whatever the file carries for shape compatibility is discarded here, not validated.
+  return { ...(r as unknown as Task), source, externalId, recurring: false, remoteDeletedAt: null }
 }
 
 function validateSubtaskRow(
   row: unknown,
   index: number,
   seenIds: Set<number>,
-  taskIds: ReadonlySet<number>
+  taskIds: ReadonlySet<number>,
+  seenSyncPairs: Set<string>
 ): Subtask {
   if (!isRecord(row)) fail('subtasks', index, 'must be an object')
   const r = row as Record<string, unknown>
@@ -329,7 +425,9 @@ function validateSubtaskRow(
   checkBoolean(r.done, 'subtasks', index, 'done')
   checkFiniteInt(r.sortOrder, 'subtasks', index, 'sortOrder')
 
-  return r as unknown as Subtask
+  const { source, externalId } = checkSyncOrigin(r, 'subtasks', index, seenSyncPairs)
+
+  return { ...(r as unknown as Subtask), source, externalId }
 }
 
 const MODES: readonly TimerMode[] = ['pomodoro', 'flowmodoro']
@@ -423,13 +521,22 @@ export function validateExport(data: unknown): ExportFile {
   }
 
   const projectIds = new Set<number>()
-  const projects = data.projects.map((row, i) => validateProjectRow(row, i, projectIds))
+  const projectSyncPairs = new Set<string>()
+  const projects = data.projects.map((row, i) =>
+    validateProjectRow(row, i, projectIds, projectSyncPairs)
+  )
 
   const taskIds = new Set<number>()
-  const tasks = data.tasks.map((row, i) => validateTaskRow(row, i, taskIds, projectIds))
+  const taskSyncPairs = new Set<string>()
+  const tasks = data.tasks.map((row, i) =>
+    validateTaskRow(row, i, taskIds, projectIds, taskSyncPairs)
+  )
 
   const subtaskIds = new Set<number>()
-  const subtasks = data.subtasks.map((row, i) => validateSubtaskRow(row, i, subtaskIds, taskIds))
+  const subtaskSyncPairs = new Set<string>()
+  const subtasks = data.subtasks.map((row, i) =>
+    validateSubtaskRow(row, i, subtaskIds, taskIds, subtaskSyncPairs)
+  )
 
   const sessionIds = new Set<number>()
   const sessions = data.sessions.map((row, i) =>
@@ -495,17 +602,29 @@ export function applyImport(file: ExportFile): { sessions: number } {
     for (const key of SETTINGS_KEYS) deleteSetting.run(key)
 
     const insertProject = db.prepare(
-      `INSERT INTO projects (id, name, color, archived, sort_order, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO projects (id, name, color, archived, sort_order, created_at, source, external_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const p of file.projects) {
-      insertProject.run(p.id, p.name, p.color, toInt(p.archived), p.sortOrder, p.createdAt)
+      insertProject.run(
+        p.id,
+        p.name,
+        p.color,
+        toInt(p.archived),
+        p.sortOrder,
+        p.createdAt,
+        p.source,
+        p.externalId
+      )
     }
 
+    // `remote_due`/`remote_updated_at`/`remote_deleted_at` are never written here: import
+    // ignores those fields on the incoming file even when present (see mapTask's doc), so
+    // every imported task starts with no sync bookkeeping beyond its identity.
     const insertTask = db.prepare(
       `INSERT INTO tasks
-         (id, project_id, title, notes, priority, due_date, estimated_pomodoros, sort_order, completed_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, project_id, title, notes, priority, due_date, estimated_pomodoros, sort_order, completed_at, created_at, source, external_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const t of file.tasks) {
       insertTask.run(
@@ -518,15 +637,18 @@ export function applyImport(file: ExportFile): { sessions: number } {
         t.estimatedPomodoros,
         t.sortOrder,
         t.completedAt,
-        t.createdAt
+        t.createdAt,
+        t.source,
+        t.externalId
       )
     }
 
     const insertSubtask = db.prepare(
-      `INSERT INTO subtasks (id, task_id, title, done, sort_order) VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO subtasks (id, task_id, title, done, sort_order, source, external_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     for (const s of file.subtasks) {
-      insertSubtask.run(s.id, s.taskId, s.title, toInt(s.done), s.sortOrder)
+      insertSubtask.run(s.id, s.taskId, s.title, toInt(s.done), s.sortOrder, s.source, s.externalId)
     }
 
     const insertSession = db.prepare(

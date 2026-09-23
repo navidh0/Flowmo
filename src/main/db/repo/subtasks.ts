@@ -1,7 +1,18 @@
 import type { Subtask, SubtaskCreate, SubtaskUpdate } from '@shared/types'
-import { bool, getDb, num, rowId, scalarNum, str, toInt, type Row } from '../index'
+import {
+  bool,
+  getDb,
+  num,
+  rowId,
+  scalarNum,
+  str,
+  strOrNull,
+  syncSourceOrNull,
+  toInt,
+  type Row
+} from '../index'
 
-const COLUMNS = 'id, task_id, title, done, sort_order'
+const COLUMNS = 'id, task_id, title, done, sort_order, source, external_id'
 
 function mapSubtask(row: Row): Subtask {
   return {
@@ -9,7 +20,9 @@ function mapSubtask(row: Row): Subtask {
     taskId: num(row, 'task_id'),
     title: str(row, 'title'),
     done: bool(row, 'done'),
-    sortOrder: num(row, 'sort_order')
+    sortOrder: num(row, 'sort_order'),
+    source: syncSourceOrNull(row, 'source'),
+    externalId: strOrNull(row, 'external_id')
   }
 }
 

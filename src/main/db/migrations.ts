@@ -87,6 +87,104 @@ export const MIGRATIONS: readonly Migration[] = [
         'INSERT INTO projects (name, color, archived, sort_order, created_at) VALUES (?, ?, 0, 0, ?)'
       ).run('Inbox', '#6366f1', Date.now())
     }
+  },
+  {
+    // Integrations: Todoist (two-way) and iCal calendar feeds.
+    version: 2,
+    up(db) {
+      db.exec(`
+        -- Secrets are safeStorage ciphertext, never plaintext, and live in their own table so
+        -- that nothing which reads the domain tables (export above all) can reach them by
+        -- accident. Keys: 'todoist.token', 'ical.<feedId>.url' — an iCal secret address is a
+        -- credential in its own right.
+        CREATE TABLE credentials (
+          key        TEXT    PRIMARY KEY,
+          ciphertext BLOB    NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        -- source = NULL means created in Flowdo. The unique indexes are partial so that any
+        -- number of local rows coexist, while a re-sync of the same upstream row updates it
+        -- instead of duplicating it.
+        ALTER TABLE projects ADD COLUMN source      TEXT;
+        ALTER TABLE projects ADD COLUMN external_id TEXT;
+        CREATE UNIQUE INDEX idx_projects_source_ext ON projects(source, external_id)
+          WHERE source IS NOT NULL;
+
+        ALTER TABLE tasks ADD COLUMN source            TEXT;
+        ALTER TABLE tasks ADD COLUMN external_id       TEXT;
+        -- The raw upstream due object (JSON). due_date keeps only the calendar day, which is
+        -- all Flowdo models; this keeps the time and recurrence so a push that did not touch
+        -- the due date can never flatten them on the provider's side.
+        ALTER TABLE tasks ADD COLUMN remote_due        TEXT;
+        ALTER TABLE tasks ADD COLUMN remote_updated_at INTEGER;
+        -- Deleted upstream. Marked, never deleted here: the user decides, and sessions
+        -- against the task must survive either way.
+        ALTER TABLE tasks ADD COLUMN remote_deleted_at INTEGER;
+        CREATE UNIQUE INDEX idx_tasks_source_ext ON tasks(source, external_id)
+          WHERE source IS NOT NULL;
+
+        ALTER TABLE subtasks ADD COLUMN source      TEXT;
+        ALTER TABLE subtasks ADD COLUMN external_id TEXT;
+        CREATE UNIQUE INDEX idx_subtasks_source_ext ON subtasks(source, external_id)
+          WHERE source IS NOT NULL;
+
+        -- Local edits to synced rows, pushed in id order before every pull. The uuid is the
+        -- provider's command id, fixed at enqueue time, so a push retried after a network
+        -- failure can never apply twice.
+        CREATE TABLE sync_outbox (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          source     TEXT    NOT NULL,
+          uuid       TEXT    NOT NULL UNIQUE,
+          type       TEXT    NOT NULL,
+          args       TEXT    NOT NULL,
+          temp_id    TEXT,
+          created_at INTEGER NOT NULL,
+          attempts   INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT
+        );
+        CREATE INDEX idx_sync_outbox_source ON sync_outbox(source, id);
+
+        CREATE TABLE sync_state (
+          source        TEXT PRIMARY KEY,
+          sync_token    TEXT,
+          last_ok_at    INTEGER,
+          last_error    TEXT,
+          last_error_at INTEGER
+        );
+
+        CREATE TABLE calendar_feeds (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          name          TEXT    NOT NULL,
+          color         TEXT    NOT NULL,
+          enabled       INTEGER NOT NULL DEFAULT 1,
+          etag          TEXT,
+          last_modified TEXT,
+          last_ok_at    INTEGER,
+          last_error    TEXT,
+          created_at    INTEGER NOT NULL
+        );
+
+        -- Expanded occurrences for a rolling window, replaced wholesale per feed on every
+        -- successful refresh. A timed event carries instants; an all-day event carries
+        -- calendar days and no instants, for the same reason tasks.due_date does.
+        CREATE TABLE calendar_events (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          feed_id    INTEGER NOT NULL REFERENCES calendar_feeds(id) ON DELETE CASCADE,
+          uid        TEXT    NOT NULL,
+          title      TEXT    NOT NULL,
+          location   TEXT,
+          all_day    INTEGER NOT NULL,
+          start_ms   INTEGER,
+          end_ms     INTEGER,
+          start_date TEXT,
+          end_date   TEXT
+        );
+        CREATE INDEX idx_calendar_events_feed  ON calendar_events(feed_id);
+        CREATE INDEX idx_calendar_events_start ON calendar_events(start_ms);
+        CREATE INDEX idx_calendar_events_date  ON calendar_events(start_date);
+      `)
+    }
   }
 ]
 

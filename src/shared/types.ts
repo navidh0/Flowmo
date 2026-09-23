@@ -222,7 +222,24 @@ export const DEFAULT_SETTINGS: Settings = {
 // Entities
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface Project {
+/**
+ * Where a row came from. `null` means it was created in Flowdo.
+ *
+ * A synced row's `externalId` is the provider's id, always a string: Todoist ids are
+ * strings, and treating them as numbers would silently break the day one exceeds 2^53.
+ */
+export type SyncSource = 'todoist'
+
+export interface SyncOrigin {
+  source: SyncSource | null
+  externalId: string | null
+}
+
+/**
+ * Synced projects are pull-only: Flowdo mirrors them but never renames, archives or deletes
+ * them upstream, so the UI must not offer those actions on a synced project.
+ */
+export interface Project extends SyncOrigin {
   id: number
   name: string
   /** Hex, e.g. '#6366f1'. Drives the stats breakdown colours. */
@@ -237,12 +254,16 @@ export interface ProjectCreate {
   color?: string
 }
 
-export type ProjectUpdate = Partial<Omit<Project, 'id' | 'createdAt'>>
+export type ProjectUpdate = Partial<Omit<Project, 'id' | 'createdAt' | keyof SyncOrigin>>
 
 /** 1 = highest. Mirrors Focus To-Do's four levels. */
 export type Priority = 1 | 2 | 3 | 4
 
-export interface Task {
+/**
+ * A synced task is edited here and pushed upstream (two-way). Its identity fields are owned
+ * by the sync engine and are never accepted from the renderer — see `TaskUpdate`.
+ */
+export interface Task extends SyncOrigin {
   id: number
   projectId: number
   title: string
@@ -255,6 +276,13 @@ export interface Task {
   sortOrder: number
   completedAt: number | null
   createdAt: number
+  /**
+   * Recurs upstream. Completing it advances its due date on the provider and it comes back
+   * open — so the UI must not present "complete" as closing it for good.
+   */
+  recurring: boolean
+  /** Deleted upstream; kept here until the user decides. Null for local tasks. */
+  remoteDeletedAt: number | null
 }
 
 export interface TaskCreate {
@@ -266,7 +294,9 @@ export interface TaskCreate {
   estimatedPomodoros?: number | null
 }
 
-export type TaskUpdate = Partial<Omit<Task, 'id' | 'createdAt'>>
+export type TaskUpdate = Partial<
+  Omit<Task, 'id' | 'createdAt' | 'recurring' | 'remoteDeletedAt' | keyof SyncOrigin>
+>
 
 /** Task joined with counts derived from `sessions` and `subtasks`. Never stored. */
 export interface TaskWithStats extends Task {
@@ -277,7 +307,7 @@ export interface TaskWithStats extends Task {
   subtaskDone: number
 }
 
-export interface Subtask {
+export interface Subtask extends SyncOrigin {
   id: number
   taskId: number
   title: string
@@ -290,7 +320,7 @@ export interface SubtaskCreate {
   title: string
 }
 
-export type SubtaskUpdate = Partial<Omit<Subtask, 'id' | 'taskId'>>
+export type SubtaskUpdate = Partial<Omit<Subtask, 'id' | 'taskId' | keyof SyncOrigin>>
 
 /**
  * Append-only log. The single source of every statistic in the app — there are no
@@ -416,6 +446,102 @@ export interface ImportResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Integrations
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The state of one integration, as the renderer is allowed to see it.
+ *
+ * No variant carries a secret. The renderer can hand a token or feed URL to main once, and
+ * afterwards can only ever learn whether it works.
+ */
+export type IntegrationHealth =
+  | { state: 'disconnected' }
+  /**
+   * OS secure storage is not usable (Linux without an unlocked keyring falls back to a
+   * plaintext backend). Flowdo refuses to store secrets rather than store them in the clear,
+   * so the UI must explain how to fix the keyring, not invite the user to retry.
+   */
+  | { state: 'unavailable'; reason: 'no-secure-storage' }
+  | { state: 'syncing'; lastOkAt: number | null }
+  | { state: 'ok'; lastOkAt: number }
+  /**
+   * `auth`: the token was rejected — reconnecting is the only fix, and retrying is pointless.
+   * `network`: offline or unreachable; retried automatically with backoff.
+   * `rate-limit`: the provider asked us to slow down; retried after its delay.
+   * `provider`: anything else the provider returned. Shown with its message.
+   */
+  | {
+      state: 'error'
+      kind: 'auth' | 'network' | 'rate-limit' | 'provider'
+      message: string
+      lastOkAt: number | null
+      at: number
+    }
+
+export interface TodoistStatus {
+  health: IntegrationHealth
+  /** Local edits not yet accepted upstream. Non-zero while offline is normal, not an error. */
+  pendingChanges: number
+  /**
+   * Local edits upstream refused permanently (e.g. the task no longer exists there). Each is
+   * shown once and then dropped — retrying a 4xx forever would wedge the queue behind it.
+   */
+  rejectedChanges: { at: number; message: string }[]
+}
+
+export interface CalendarFeed {
+  id: number
+  name: string
+  /** Hex, e.g. '#22c55e'. Chosen by the user; data, not theme. */
+  color: string
+  enabled: boolean
+  /** Last successful refresh. Events shown are "as of" this, never presented as live. */
+  lastOkAt: number | null
+  /** Last failure message, cleared by the next success. The previous cache is kept. */
+  lastError: string | null
+}
+
+export interface CalendarFeedCreate {
+  name: string
+  /** The secret iCal address. Sent to main once and never returned by any channel. */
+  url: string
+  color?: string
+}
+
+export type CalendarFeedUpdate = Partial<Pick<CalendarFeed, 'name' | 'color' | 'enabled'>>
+
+/**
+ * One occurrence of a calendar event, recurrence already expanded by main.
+ *
+ * Exactly one of two shapes, discriminated by `allDay`: a timed event is a pair of instants;
+ * an all-day event is a pair of local calendar days with NO instants, exactly like
+ * `Task.dueDate`. Converting an all-day event to midnight-UTC instants would move it to the
+ * wrong day for anyone west of Greenwich.
+ */
+export type CalendarEvent = {
+  id: number
+  feedId: number
+  title: string
+  location: string | null
+} & (
+  | { allDay: false; startMs: number; endMs: number }
+  /** `endDate` is exclusive, as in RFC 5545: a one-day event on the 3rd ends on the 4th. */
+  | { allDay: true; startDate: string; endDate: string }
+)
+
+/**
+ * Pushed after anything outside the renderer changed stored data — a sync pull, a calendar
+ * refresh — so the stores re-read instead of showing what was true before the sync.
+ */
+export type DataChangedScope = 'tasks' | 'projects' | 'calendar'
+
+/** Where a synced task lives upstream, for "open in Todoist". */
+export function todoistTaskUrl(externalId: string): string {
+  return `https://app.todoist.com/app/task/${encodeURIComponent(externalId)}`
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The preload bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -469,7 +595,17 @@ export interface FlowdoApi {
     setCompleted(id: number, completed: boolean): Promise<TaskWithStats>
     /** Persist an explicit order; ids in their new order. */
     reorder(ids: number[]): Promise<void>
+    /**
+     * Delete a task. For a synced task this ALSO deletes it upstream (queued for the next
+     * sync), unless it was already deleted there — the UI must say which before confirming.
+     */
     remove(id: number): Promise<void>
+    /**
+     * Turn a synced task (and its subtasks) into local ones: the link upstream is dropped and
+     * nothing is pushed. This is the "keep it" answer for a task deleted upstream, and the
+     * only way sync-owned fields change from the renderer.
+     */
+    keepLocal(id: number): Promise<TaskWithStats>
   }
 
   subtasks: {
@@ -523,6 +659,57 @@ export interface FlowdoApi {
      * fires. Must leave the real registrations untouched.
      */
     probeHotkey(accelerator: string): Promise<HotkeyProbe>
+    /**
+     * Temporarily unregister (true) or restore (false) the app's own global shortcuts.
+     *
+     * While the settings screen records a new combination, the live shortcuts would
+     * otherwise fire — pressing the skip combination while rebinding start/pause would skip
+     * the timer instead of being captured. Restored automatically if the window closes or
+     * reloads, so a crashed settings screen cannot leave the hotkeys dead.
+     */
+    suspendHotkeys(suspended: boolean): Promise<void>
+  }
+
+  integrations: {
+    todoist: {
+      status(): Promise<TodoistStatus>
+      /**
+       * Validate the token against the API, then store it encrypted and start syncing.
+       * Resolves to the resulting status; an invalid token is an `error`/`auth` status,
+       * and nothing is stored.
+       */
+      connect(token: string): Promise<TodoistStatus>
+      /**
+       * Forget the token and stop syncing. Synced tasks stay, converted to local tasks —
+       * the sessions logged against them are history, and disconnecting must not erase it.
+       * Pending changes are discarded, and the UI must say so before calling this.
+       */
+      disconnect(): Promise<void>
+      syncNow(): Promise<TodoistStatus>
+      onStatus(cb: (status: TodoistStatus) => void): () => void
+    }
+    calendars: {
+      list(): Promise<CalendarFeed[]>
+      /** Fetches and parses the feed before saving it, so a wrong URL fails here, visibly. */
+      add(feed: CalendarFeedCreate): Promise<CalendarFeed>
+      update(id: number, patch: CalendarFeedUpdate): Promise<CalendarFeed>
+      /** Deletes the feed, its cached events, and its stored URL. */
+      remove(id: number): Promise<void>
+      refreshNow(): Promise<CalendarFeed[]>
+      /** Whether secrets can be stored at all; if not, adding a feed will be refused. */
+      secureStorageAvailable(): Promise<boolean>
+    }
+  }
+
+  calendar: {
+    /** Occurrences overlapping [fromMs, toMs), from enabled feeds, timed and all-day alike.
+     *  All-day events are included when their local day range overlaps the local days
+     *  the range covers. */
+    eventsRange(fromMs: number, toMs: number): Promise<CalendarEvent[]>
+  }
+
+  events: {
+    onDataChanged(cb: (scope: DataChangedScope) => void): () => void
   }
 
   app: {

@@ -31,7 +31,8 @@ export const CH = {
     update: 'tasks:update',
     setCompleted: 'tasks:setCompleted',
     reorder: 'tasks:reorder',
-    remove: 'tasks:remove'
+    remove: 'tasks:remove',
+    keepLocal: 'tasks:keepLocal'
   },
   subtasks: {
     list: 'subtasks:list',
@@ -59,7 +60,25 @@ export const CH = {
   },
   system: {
     getHotkeyFailures: 'system:getHotkeyFailures',
-    probeHotkey: 'system:probeHotkey'
+    probeHotkey: 'system:probeHotkey',
+    suspendHotkeys: 'system:suspendHotkeys'
+  },
+  todoist: {
+    status: 'todoist:status',
+    connect: 'todoist:connect',
+    disconnect: 'todoist:disconnect',
+    syncNow: 'todoist:syncNow'
+  },
+  calendars: {
+    list: 'calendars:list',
+    add: 'calendars:add',
+    update: 'calendars:update',
+    remove: 'calendars:remove',
+    refreshNow: 'calendars:refreshNow',
+    secureStorageAvailable: 'calendars:secureStorageAvailable'
+  },
+  calendar: {
+    eventsRange: 'calendar:eventsRange'
   },
   app: {
     getVersion: 'app:getVersion',
@@ -74,5 +93,7 @@ export const EV = {
   timerTick: 'ev:timer:tick',
   timerPhaseEnd: 'ev:timer:phaseEnd',
   settingsChanged: 'ev:settings:changed',
-  hotkeyFailures: 'ev:system:hotkeyFailures'
+  hotkeyFailures: 'ev:system:hotkeyFailures',
+  todoistStatus: 'ev:todoist:status',
+  dataChanged: 'ev:data:changed'
 } as const

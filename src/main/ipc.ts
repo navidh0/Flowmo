@@ -22,6 +22,7 @@ import type {
   TimerMode
 } from '@shared/types'
 import type { TimerService } from './timer'
+import { getHotkeyFailures, probeHotkey } from './hotkeys'
 import * as projectsRepo from './db/repo/projects'
 import * as tasksRepo from './db/repo/tasks'
 import * as subtasksRepo from './db/repo/subtasks'
@@ -106,6 +107,11 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     sessionsRepo.listRange(fromMs, toMs)
   )
   ipcMain.handle(CH.sessions.recent, (_e, limit: number) => sessionsRepo.recent(limit))
+  ipcMain.handle(CH.sessions.remove, (_e, id: number) => sessionsRepo.remove(id))
+
+  // ── system ──
+  ipcMain.handle(CH.system.getHotkeyFailures, () => getHotkeyFailures())
+  ipcMain.handle(CH.system.probeHotkey, (_e, accelerator: string) => probeHotkey(accelerator))
 
   // ── stats ──
   ipcMain.handle(CH.stats.summary, (_e, range: StatsRange) => statsRepo.summary(range))

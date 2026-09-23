@@ -12,6 +12,7 @@ import type { IpcRendererEvent } from 'electron'
 import { CH, EV } from '@shared/channels'
 import type {
   FlowdoApi,
+  HotkeyFailure,
   OnRunningSession,
   PhaseEndEvent,
   ProjectCreate,
@@ -88,7 +89,8 @@ const api: FlowdoApi = {
   sessions: {
     listRange: (fromMs: number, toMs: number) =>
       ipcRenderer.invoke(CH.sessions.listRange, fromMs, toMs),
-    recent: (limit?: number) => ipcRenderer.invoke(CH.sessions.recent, limit ?? 50)
+    recent: (limit?: number) => ipcRenderer.invoke(CH.sessions.recent, limit ?? 50),
+    remove: (id: number) => ipcRenderer.invoke(CH.sessions.remove, id)
   },
 
   stats: {
@@ -101,6 +103,19 @@ const api: FlowdoApi = {
     get: () => ipcRenderer.invoke(CH.settings.get),
     set: (patch: Partial<Settings>) => ipcRenderer.invoke(CH.settings.set, patch),
     onChange: (cb: (settings: Settings) => void) => subscribe(EV.settingsChanged, cb)
+  },
+
+  data: {
+    exportJson: () => ipcRenderer.invoke(CH.data.exportJson),
+    importJson: () => ipcRenderer.invoke(CH.data.importJson)
+  },
+
+  system: {
+    onHotkeyFailures: (cb: (failures: HotkeyFailure[]) => void) =>
+      subscribe(EV.hotkeyFailures, cb),
+    getHotkeyFailures: () => ipcRenderer.invoke(CH.system.getHotkeyFailures),
+    probeHotkey: (accelerator: string) =>
+      ipcRenderer.invoke(CH.system.probeHotkey, accelerator)
   },
 
   app: {

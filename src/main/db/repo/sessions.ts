@@ -90,3 +90,15 @@ export function recent(limit = 20): Session[] {
     .all(Math.max(1, Math.trunc(limit)))
     .map((row) => mapSession(row))
 }
+
+/**
+ * Delete one logged session.
+ *
+ * The only destructive operation on this table, and the reason it exists is that a
+ * mis-logged session silently skews every statistic above it. Deleting by id only —
+ * there is deliberately no bulk delete, because "remove everything in this range" is
+ * how a user loses a month by fencepost error.
+ */
+export function remove(id: number): void {
+  getDb().prepare('DELETE FROM sessions WHERE id = ?').run(id)
+}

@@ -1,5 +1,11 @@
-import type { Settings, TimerMode } from '@shared/types'
-import { DEFAULT_SETTINGS } from '@shared/types'
+import type { LayoutSettings, PanelId, Settings, TimerMode } from '@shared/types'
+import {
+  DEFAULT_LAYOUT,
+  DEFAULT_SETTINGS,
+  PANEL_IDS,
+  PANEL_MAX_WIDTH,
+  PANEL_MIN_WIDTH
+} from '@shared/types'
 import { getDb, str, tx } from '../index'
 
 /**
@@ -54,6 +60,60 @@ function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallb
 const MODES: readonly TimerMode[] = ['pomodoro', 'flowmodoro']
 const THEMES: readonly Settings['theme'][] = ['system', 'light', 'dark']
 
+function isPanelId(value: unknown): value is PanelId {
+  for (const id of PANEL_IDS) {
+    if (id === value) return true
+  }
+  return false
+}
+
+/**
+ * The one structured setting, validated field by field like every scalar above.
+ *
+ * A layout is only useful if it is coherent: a partial or reordered-away panel leaves the
+ * shell unable to render a column. So anything that is not a complete permutation of
+ * PANEL_IDS falls back wholesale to DEFAULT_LAYOUT rather than being patched up —
+ * a half-repaired layout is harder to reason about than a reset one, and the user has a
+ * "Reset layout" button precisely because this is recoverable.
+ *
+ * Widths are clamped rather than rejected: a stored 5000px is a resize against a monitor
+ * that no longer exists, and clamping keeps the panel usable where discarding would throw
+ * away an otherwise fine layout.
+ */
+function pickLayout(value: unknown): LayoutSettings {
+  if (typeof value !== 'object' || value === null) return DEFAULT_LAYOUT
+  const raw = value as Partial<Record<keyof LayoutSettings, unknown>>
+
+  const order = Array.isArray(raw.order) ? raw.order.filter(isPanelId) : []
+  // Every panel exactly once, or the shell cannot lay itself out.
+  if (order.length !== PANEL_IDS.length || new Set(order).size !== PANEL_IDS.length) {
+    return DEFAULT_LAYOUT
+  }
+
+  const storedWidths =
+    typeof raw.widths === 'object' && raw.widths !== null
+      ? (raw.widths as Record<string, unknown>)
+      : {}
+
+  const widths = { ...DEFAULT_LAYOUT.widths }
+  for (const id of PANEL_IDS) {
+    const width = storedWidths[id]
+    if (typeof width === 'number' && Number.isFinite(width)) {
+      widths[id] = Math.min(PANEL_MAX_WIDTH[id], Math.max(PANEL_MIN_WIDTH[id], Math.round(width)))
+    }
+  }
+
+  const collapsed = Array.isArray(raw.collapsed) ? raw.collapsed.filter(isPanelId) : []
+  // The last panel flexes to fill; collapsing it would leave the shell with no filler.
+  const flexing = order[order.length - 1]
+
+  return {
+    order,
+    widths,
+    collapsed: [...new Set(collapsed)].filter((id) => id !== flexing)
+  }
+}
+
 /**
  * The full settings object, stored values layered over `DEFAULT_SETTINGS`.
  *
@@ -92,8 +152,64 @@ export function get(): Settings {
     hotkeyStartPause: pickString(s.get('hotkeyStartPause'), d.hotkeyStartPause),
     hotkeySkip: pickString(s.get('hotkeySkip'), d.hotkeySkip),
 
-    sleepGraceMs: pickNumber(s.get('sleepGraceMs'), d.sleepGraceMs)
+    sleepGraceMs: pickNumber(s.get('sleepGraceMs'), d.sleepGraceMs),
+
+    layout: pickLayout(s.get('layout'))
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Window bounds — main-process only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where the main window was last placed.
+ *
+ * Deliberately NOT part of `Settings`, even though it shares this table. Settings are
+ * broadcast to every renderer on each change and window geometry is of no interest to
+ * any of them; routing bounds through `set()` would push an IPC message to two windows
+ * every time the user finishes dragging one. The key is outside `DEFAULT_SETTINGS`, so
+ * `get()` and `set()` ignore it entirely.
+ */
+const WINDOW_BOUNDS_KEY = 'internal:windowBounds'
+
+export interface StoredBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export function getWindowBounds(): StoredBounds | null {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(WINDOW_BOUNDS_KEY)
+  if (!row) return null
+
+  try {
+    const parsed: unknown = JSON.parse(str(row, 'value'))
+    if (typeof parsed !== 'object' || parsed === null) return null
+
+    const b = parsed as Record<string, unknown>
+    const nums = [b.x, b.y, b.width, b.height]
+    if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return null
+
+    return {
+      x: b.x as number,
+      y: b.y as number,
+      width: b.width as number,
+      height: b.height as number
+    }
+  } catch {
+    return null
+  }
+}
+
+export function setWindowBounds(bounds: StoredBounds): void {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    .run(WINDOW_BOUNDS_KEY, JSON.stringify(bounds))
 }
 
 /**

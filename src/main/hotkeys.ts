@@ -9,16 +9,21 @@
  */
 
 import { globalShortcut } from 'electron'
-import type { Settings } from '@shared/types'
+import type { HotkeyAction, HotkeyFailure, HotkeyProbe, Settings } from '@shared/types'
 
-export type HotkeyAction = 'startPause' | 'skip'
+// Re-exported for main-process callers that already import from here.
+export type { HotkeyAction, HotkeyFailure } from '@shared/types'
 
-export interface HotkeyFailure {
-  action: HotkeyAction
-  accelerator: string
-  /** `taken`: another app owns it. `invalid`: Electron rejected the string. */
-  reason: 'taken' | 'invalid'
-}
+/**
+ * Wayland exposes no global-shortcut protocol, so `globalShortcut.register()` returns
+ * true and then nothing ever fires — the worst possible failure, because it looks like
+ * success. Detected once at module load: the session type cannot change under a running
+ * process.
+ *
+ * X11 and XWayland sessions are fine; only a native Wayland session is affected.
+ */
+const GLOBAL_SHORTCUTS_UNAVAILABLE =
+  process.platform === 'linux' && process.env['XDG_SESSION_TYPE']?.toLowerCase() === 'wayland'
 
 export interface HotkeyDeps {
   getSettings(): Settings
@@ -44,6 +49,27 @@ export function reregisterHotkeys(settings: Settings): HotkeyFailure[] {
   unregisterHotkeys()
   const d = deps
   if (!d) return []
+
+  // Report rather than attempt: on Wayland registration reports success and then never
+  // fires, so trying and trusting the result would tell the user their hotkey works.
+  if (GLOBAL_SHORTCUTS_UNAVAILABLE) {
+    failures = ([
+      ['startPause', settings.hotkeyStartPause],
+      ['skip', settings.hotkeySkip]
+    ] as const)
+      .filter(([, accelerator]) => accelerator.trim() !== '')
+      .map(([action, accelerator]) => ({
+        action,
+        accelerator: accelerator.trim(),
+        reason: 'unavailable' as const
+      }))
+
+    if (failures.length > 0) {
+      console.warn('[hotkeys] global shortcuts are unavailable under Wayland')
+      d.onFailure?.(failures)
+    }
+    return failures
+  }
 
   failures = [
     register('startPause', settings.hotkeyStartPause, () => d.onStartPause()),
@@ -80,6 +106,49 @@ export function getHotkeyFailures(): HotkeyFailure[] {
 
 export function getRegisteredHotkeys(): string[] {
   return [...registered]
+}
+
+/**
+ * Non-destructively test whether an accelerator is available.
+ *
+ * Registers, reads the result, and immediately unregisters — so the settings UI can tell
+ * the user a combination is taken WHILE THEY ARE CHOOSING IT, instead of accepting it and
+ * leaving them to discover months later that it never fired.
+ *
+ * Two things this must not do, both of which would be silent damage:
+ *  - Probing an accelerator we already own would unregister our own live shortcut to test
+ *    it, then re-register a no-op handler in its place. That case short-circuits to 'free'
+ *    without touching the registration — re-choosing your own current binding is fine, and
+ *    flagging cross-action conflicts is the settings UI's job, not this function's.
+ *  - The unregister runs in a `finally`, so a throw between register and cleanup cannot
+ *    leave a stray handler owning a combination the app never uses.
+ */
+export function probeHotkey(accelerator: string): HotkeyProbe {
+  if (GLOBAL_SHORTCUTS_UNAVAILABLE) return 'unavailable'
+
+  const value = accelerator.trim()
+  // An empty accelerator is how the user turns a hotkey off, not something to probe.
+  if (value === '') return 'free'
+
+  // Ours already. Registering again would succeed and the cleanup would then drop the
+  // real binding.
+  if (registered.includes(value)) return 'free'
+
+  let acquired = false
+  try {
+    acquired = globalShortcut.register(value, () => {})
+    return acquired ? 'free' : 'taken'
+  } catch {
+    return 'invalid'
+  } finally {
+    if (acquired) {
+      try {
+        globalShortcut.unregister(value)
+      } catch {
+        /* nothing to release */
+      }
+    }
+  }
 }
 
 function register(action: HotkeyAction, accelerator: string, handler: () => void): HotkeyFailure | null {

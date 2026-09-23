@@ -105,12 +105,15 @@ function emptySplit(): ModeSplit {
  * every morning until the first session lands, which is exactly when the number is
  * supposed to be motivating.
  *
+ * Abandoned sessions still count toward focusMs (time spent is time spent), but they must
+ * not extend the streak — only a completed focus session does.
+ *
  * One indexed EXISTS probe per day, walking back until a day comes up empty.
  */
 export function streakDays(now = Date.now()): number {
   const stmt = getDb().prepare(
     `SELECT 1 AS value FROM sessions
-     WHERE kind = 'focus' AND started_at >= ? AND started_at < ?
+     WHERE kind = 'focus' AND completed = 1 AND started_at >= ? AND started_at < ?
      LIMIT 1`
   )
   const hasFocus = (dayStart: number): boolean =>

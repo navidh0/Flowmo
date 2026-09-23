@@ -24,10 +24,12 @@ import { disposePower, initPower, setFocusActive } from './power'
 import {
   broadcast,
   createMainWindow,
+  getMainWindow,
   getMiniWindow,
   setMiniWidget,
   setQuitting,
-  showMainWindow
+  showMainWindow,
+  type WindowBounds
 } from './windows'
 
 /**
@@ -42,6 +44,12 @@ let timer: TimerService
 
 /** Tray tooltips only need second resolution; the timer ticks four times faster. */
 let lastTrayUpdateMs = 0
+
+/** Last value handed to setProgressBar, so an unchanged bar is not re-set 4×/second. */
+let lastProgress = -1
+
+/** Pending window-bounds write. Resize fires per frame; only the final rest position matters. */
+let boundsTimer: NodeJS.Timeout | null = null
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -96,10 +104,17 @@ if (!gotLock) {
     initHotkeys({
       getSettings: () => settings,
       onStartPause: toggleStartPause,
-      onSkip: () => timer.skip()
+      onSkip: () => timer.skip(),
+      // Without this the classification in hotkeys.ts never left the main process, so a
+      // combination another app already owned simply did nothing and said nothing.
+      onFailure: (failures) => broadcast(EV.hotkeyFailures, failures)
     })
 
-    createMainWindow({ minimizeToTray: () => settings.minimizeToTray })
+    createMainWindow({
+      minimizeToTray: () => settings.minimizeToTray,
+      savedBounds: settingsRepo.getWindowBounds(),
+      onBoundsChanged: rememberBounds
+    })
     if (settings.showMiniWidget) setMiniWidget(true)
 
     // Paint the tray with the real initial state rather than leaving it blank until the
@@ -108,7 +123,11 @@ if (!gotLock) {
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        createMainWindow({ minimizeToTray: () => settings.minimizeToTray })
+        createMainWindow({
+          minimizeToTray: () => settings.minimizeToTray,
+          savedBounds: settingsRepo.getWindowBounds(),
+          onBoundsChanged: rememberBounds
+        })
       } else {
         showMainWindow()
       }
@@ -122,6 +141,14 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     setQuitting(true)
+    // Flush a pending bounds write before the database closes, or quitting right after a
+    // resize loses the position the user just chose.
+    if (boundsTimer) {
+      clearTimeout(boundsTimer)
+      boundsTimer = null
+      const win = getMainWindow()
+      if (win && !win.isMinimized()) settingsRepo.setWindowBounds(win.getNormalBounds())
+    }
     timer?.dispose()
     destroyTray()
     unregisterHotkeys()
@@ -129,6 +156,18 @@ if (!gotLock) {
     disposeNotifications()
     closeDb()
   })
+}
+
+/**
+ * Debounced: `resize` and `move` fire continuously while a window is being dragged, and
+ * each write is a SQLite round trip. Only where it comes to rest matters.
+ */
+function rememberBounds(bounds: WindowBounds): void {
+  if (boundsTimer) clearTimeout(boundsTimer)
+  boundsTimer = setTimeout(() => {
+    boundsTimer = null
+    settingsRepo.setWindowBounds(bounds)
+  }, 400)
 }
 
 /**
@@ -162,6 +201,40 @@ function onTick(state: TimerState): void {
     lastTrayUpdateMs = now
     updateTray(state)
   }
+
+  updateProgressBar(state)
+}
+
+/**
+ * Taskbar progress — glanceable state without raising the window.
+ *
+ * Only bounded phases have meaningful progress. An open-ended Flowmodoro focus has no
+ * target by definition, so it gets the indeterminate bar rather than a fake percentage
+ * climbing toward a number that does not exist.
+ *
+ * Windows only in practice: on Linux this needs a Unity launcher and `desktopName`, and
+ * elsewhere it is a silent no-op — which is the correct degradation, so no guard here.
+ */
+function updateProgressBar(state: TimerState): void {
+  const win = getMainWindow()
+  if (!win) return
+
+  let progress: number
+  if (state.status === 'idle' || state.kind === null) {
+    progress = -1 // clears the bar
+  } else if (state.remainingMs === null) {
+    progress = 2 // Electron's indeterminate mode
+  } else {
+    progress = Math.min(1, Math.max(0, state.progress))
+  }
+
+  // Quantised: the bar cannot show more than about a percent, and setting it 4×/second
+  // is a needless native call on every tick.
+  const quantised = progress < 0 ? -1 : progress === 2 ? 2 : Math.round(progress * 100) / 100
+  if (quantised === lastProgress) return
+
+  lastProgress = quantised
+  win.setProgressBar(quantised, state.status === 'paused' ? { mode: 'paused' } : undefined)
 }
 
 function toggleStartPause(): void {

@@ -132,6 +132,55 @@ export interface Settings {
    * subtracted from its focus time. Sleeping for an hour is not an hour of focus.
    */
   sleepGraceMs: number
+
+  /** Shell arrangement. See `LayoutSettings`. */
+  layout: LayoutSettings
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Layout
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The three columns of the main shell, left to right by default. */
+export type PanelId = 'projects' | 'timer' | 'main'
+
+export const PANEL_IDS: readonly PanelId[] = ['projects', 'timer', 'main']
+
+/**
+ * User-arranged shell layout.
+ *
+ * Stored as a single settings key rather than one row per field. That is a deliberate,
+ * bounded exception to the rule in db/repo/settings.ts: layout is written from exactly
+ * one place and is a coherent unit, and being one key among many it still cannot clobber
+ * an unrelated setting.
+ */
+export interface LayoutSettings {
+  /** Left-to-right order. Always a permutation of PANEL_IDS. */
+  order: PanelId[]
+  /** Pixel widths. The last panel in `order` flexes and ignores its entry. */
+  widths: Record<PanelId, number>
+  /** Panels currently collapsed to a rail. Never contains the flexing panel. */
+  collapsed: PanelId[]
+}
+
+/** Below this a panel is unusable, so a drag clamps here rather than to zero. */
+export const PANEL_MIN_WIDTH: Record<PanelId, number> = {
+  projects: 160,
+  timer: 300,
+  main: 280
+}
+
+export const PANEL_MAX_WIDTH: Record<PanelId, number> = {
+  projects: 420,
+  timer: 560,
+  main: 900
+}
+
+/** Matches the widths v0.1 hard-coded in App.tsx, so upgrading changes nothing visually. */
+export const DEFAULT_LAYOUT: LayoutSettings = {
+  order: ['projects', 'timer', 'main'],
+  widths: { projects: 208, timer: 368, main: 480 },
+  collapsed: []
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -164,7 +213,9 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkeyStartPause: 'Control+Alt+P',
   hotkeySkip: 'Control+Alt+S',
 
-  sleepGraceMs: 2 * 60_000
+  sleepGraceMs: 2 * 60_000,
+
+  layout: DEFAULT_LAYOUT
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,6 +356,66 @@ export interface ProjectBucket {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// System / hotkeys
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type HotkeyAction = 'startPause' | 'skip'
+
+/**
+ * Why a global shortcut is not active. Lives here rather than in main/hotkeys.ts
+ * because it crosses the process boundary to the settings UI.
+ */
+export interface HotkeyFailure {
+  action: HotkeyAction
+  accelerator: string
+  /**
+   * `taken`   — another running application owns the combination.
+   * `invalid` — Electron rejected the accelerator string.
+   * `unavailable` — the platform exposes no global-shortcut mechanism at all.
+   *   This is the Wayland case: no combination will work, so the UI must say so
+   *   rather than inviting the user to try a different one.
+   */
+  reason: 'taken' | 'invalid' | 'unavailable'
+}
+
+/** Result of a non-destructive probe, used while the user is choosing a combination. */
+export type HotkeyProbe = 'free' | 'taken' | 'invalid' | 'unavailable'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Import / export
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The on-disk export payload.
+ *
+ * `version` is mandatory and present from the first file ever written: once exports
+ * exist in the wild, a format with no version is guesswork to parse. It is also what
+ * will make it safe to start EXCLUDING data (integration tokens) in a later version.
+ */
+export interface ExportFile {
+  version: 1
+  exportedAt: number
+  projects: Project[]
+  tasks: Task[]
+  subtasks: Subtask[]
+  sessions: Session[]
+  settings: Partial<Settings>
+}
+
+/** `path: null` means the user cancelled the dialog — a normal outcome, not an error. */
+export interface ExportResult {
+  path: string | null
+  sessions: number
+}
+
+export interface ImportResult {
+  path: string | null
+  sessions: number
+  /** Where the pre-import backup of the database was written. */
+  backupPath: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The preload bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -371,6 +482,8 @@ export interface FlowdoApi {
   sessions: {
     listRange(fromMs: number, toMs: number): Promise<Session[]>
     recent(limit?: number): Promise<Session[]>
+    /** Delete one logged session. Every statistic above it drops accordingly. */
+    remove(id: number): Promise<void>
   }
 
   stats: {
@@ -383,6 +496,33 @@ export interface FlowdoApi {
     get(): Promise<Settings>
     set(patch: Partial<Settings>): Promise<Settings>
     onChange(cb: (settings: Settings) => void): () => void
+  }
+
+  data: {
+    /** Whole database out through a save dialog, as an `ExportFile`. */
+    exportJson(): Promise<ExportResult>
+    /**
+     * Replace the database from an export file, NOT merge it.
+     *
+     * Merging invites duplicate sessions with no stable identity to deduplicate on.
+     * Main writes a timestamped backup first and returns where it went, so the UI can
+     * state plainly that the current history is being replaced.
+     */
+    importJson(): Promise<ImportResult>
+  }
+
+  system: {
+    /** Pushed whenever a registration pass produces failures. */
+    onHotkeyFailures(cb: (failures: HotkeyFailure[]) => void): () => void
+    getHotkeyFailures(): Promise<HotkeyFailure[]>
+    /**
+     * Register, check, and immediately unregister an accelerator.
+     *
+     * This is what makes the rebinding UI honest: the user learns a combination is
+     * taken WHILE CHOOSING IT, rather than silently discovering later that it never
+     * fires. Must leave the real registrations untouched.
+     */
+    probeHotkey(accelerator: string): Promise<HotkeyProbe>
   }
 
   app: {

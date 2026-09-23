@@ -41,7 +41,8 @@ export const CH = {
   },
   sessions: {
     listRange: 'sessions:listRange',
-    recent: 'sessions:recent'
+    recent: 'sessions:recent',
+    remove: 'sessions:remove'
   },
   stats: {
     summary: 'stats:summary',
@@ -51,6 +52,14 @@ export const CH = {
   settings: {
     get: 'settings:get',
     set: 'settings:set'
+  },
+  data: {
+    exportJson: 'data:exportJson',
+    importJson: 'data:importJson'
+  },
+  system: {
+    getHotkeyFailures: 'system:getHotkeyFailures',
+    probeHotkey: 'system:probeHotkey'
   },
   app: {
     getVersion: 'app:getVersion',
@@ -64,5 +73,6 @@ export const CH = {
 export const EV = {
   timerTick: 'ev:timer:tick',
   timerPhaseEnd: 'ev:timer:phaseEnd',
-  settingsChanged: 'ev:settings:changed'
+  settingsChanged: 'ev:settings:changed',
+  hotkeyFailures: 'ev:system:hotkeyFailures'
 } as const

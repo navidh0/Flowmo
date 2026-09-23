@@ -3,12 +3,19 @@
  * under `components/`, this file only composes them and connects the two surfaces.
  */
 
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import type { LayoutSettings } from '@shared/types'
 import { MiniWidget } from './components/mini'
+import { NavBar, ResizableShell, type Screen } from './components/shell'
 import { ProjectSidebar, TasksPanel } from './components/tasks'
 import { TimerPanel } from './components/timer'
 import { useTasksStore } from './stores/tasks'
 import { useTimerStore, useTimerSync } from './stores/timer'
+
+// Off the startup path: recharts is the heaviest thing in the bundle and the Focus screen,
+// which is what opens every time, never needs it.
+const StatsPage = lazy(() => import('./components/stats'))
+const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
 
 /**
  * The mini widget is a second BrowserWindow loading the same bundle at `#/mini`
@@ -52,21 +59,39 @@ export default function App(): React.JSX.Element {
 function MainShell(): React.JSX.Element {
   useRefreshTasksOnPhaseEnd()
 
+  // Which screen is open is not a setting: the app should always reopen on Focus.
+  const [screen, setScreen] = useState<Screen>('focus')
+  const layout = useTimerStore((s) => s.settings.layout)
+
+  // The shell only calls this on release, never per drag frame — each call is a SQLite
+  // write, a broadcast to both windows and a tray refresh in main.
+  const commitLayout = useCallback((next: LayoutSettings) => {
+    void window.flowdo.settings.set({ layout: next })
+  }, [])
+
+  const secondary = screen === 'stats' ? <StatsPage /> : <SettingsPage />
+
   return (
     <div className="flex h-full min-h-0 bg-[var(--color-surface)]">
-      <aside className="w-52 shrink-0 border-r border-[var(--color-border)]">
-        <ProjectSidebar />
-      </aside>
+      <NavBar current={screen} onNavigate={setScreen} />
 
-      {/* The timer is the centrepiece, so it gets a fixed, generous column rather than
-          competing with the task list for width as the window resizes. */}
-      <section className="flex w-[23rem] shrink-0 flex-col border-r border-[var(--color-border)]">
-        <TimerPanel />
-      </section>
-
-      <main className="min-w-0 flex-1">
-        <TasksPanel />
-      </main>
+      {/* The timer column is pinned on every screen: the thing you are timing should not
+          disappear because you went to look at last week's numbers. The project list only
+          means something next to the task list, so it is hidden elsewhere. */}
+      <ResizableShell
+        layout={layout}
+        onLayoutCommit={commitLayout}
+        panels={{
+          projects: screen === 'focus' ? <ProjectSidebar /> : null,
+          timer: <TimerPanel />,
+          main:
+            screen === 'focus' ? (
+              <TasksPanel />
+            ) : (
+              <Suspense fallback={null}>{secondary}</Suspense>
+            )
+        }}
+      />
     </div>
   )
 }

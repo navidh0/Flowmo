@@ -171,6 +171,55 @@ describe('focusMs vs completed pomodoros — deliberate disagreement', () => {
   })
 })
 
+describe('avgFocusMs — completed focus sessions only', () => {
+  it('is 0 when the only focus session is abandoned, even though focusMs is nonzero', () => {
+    const startedAt = local(2026, 5, 15, 10, 0)
+    sessionsRepo.create(
+      focusSession({
+        startedAt,
+        endedAt: startedAt + 8_000,
+        actualMs: 8_000,
+        completed: false
+      })
+    )
+
+    const now = local(2026, 5, 15, 12, 0)
+    const summary = stats.summary('today', now)
+
+    expect(summary.avgFocusMs).toBe(0)
+    expect(summary.focusMs).toBeGreaterThan(0)
+  })
+
+  it('averages only the completed session, while focusMs/focusSessions include the abandoned one', () => {
+    const completedStart = local(2026, 5, 15, 9, 0)
+    sessionsRepo.create(
+      focusSession({
+        startedAt: completedStart,
+        endedAt: completedStart + 25 * MINUTE,
+        actualMs: 25 * MINUTE,
+        completed: true
+      })
+    )
+
+    const abandonedStart = local(2026, 5, 15, 10, 0)
+    sessionsRepo.create(
+      focusSession({
+        startedAt: abandonedStart,
+        endedAt: abandonedStart + 5 * MINUTE,
+        actualMs: 5 * MINUTE,
+        completed: false
+      })
+    )
+
+    const now = local(2026, 5, 15, 12, 0)
+    const summary = stats.summary('today', now)
+
+    expect(summary.avgFocusMs).toBe(25 * MINUTE)
+    expect(summary.focusMs).toBe(30 * MINUTE)
+    expect(summary.focusSessions).toBe(2)
+  })
+})
+
 describe('byProject', () => {
   it('buckets sessions with no project under projectId 0', () => {
     const startedAt = local(2026, 5, 15, 9, 0)

@@ -7,7 +7,7 @@
  * hotkeys) lives in `index.ts` and reaches this file through `IpcContext`.
  */
 
-import { app, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { CH } from '@shared/channels'
 import type {
   OnRunningSession,
@@ -23,6 +23,7 @@ import type {
 } from '@shared/types'
 import type { TimerService } from './timer'
 import { getHotkeyFailures, probeHotkey } from './hotkeys'
+import { exportJson, importJson } from './dataio'
 import * as projectsRepo from './db/repo/projects'
 import * as tasksRepo from './db/repo/tasks'
 import * as subtasksRepo from './db/repo/subtasks'
@@ -35,6 +36,11 @@ export interface IpcContext {
   getSettings(): Settings
   /** Persists, updates the cache, and applies side effects (hotkeys, login item, mode). */
   applySettingsPatch(patch: Partial<Settings>): Settings
+  /**
+   * Re-derive everything main caches from the database after an import replaced it:
+   * settings, hotkeys, login item, mini widget, and the renderers' own stores.
+   */
+  reloadAfterImport(): void
 }
 
 export function registerIpcHandlers(ctx: IpcContext): void {
@@ -108,6 +114,29 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   )
   ipcMain.handle(CH.sessions.recent, (_e, limit: number) => sessionsRepo.recent(limit))
   ipcMain.handle(CH.sessions.remove, (_e, id: number) => sessionsRepo.remove(id))
+
+  // ── data ──
+  ipcMain.handle(CH.data.exportJson, (e) =>
+    exportJson(BrowserWindow.fromWebContents(e.sender) ?? undefined)
+  )
+  ipcMain.handle(CH.data.importJson, async (e) => {
+    // A live session holds a task id and will be written when it ends; if the import has
+    // removed that task, the session either fails its foreign key or attaches to whatever
+    // row now owns the id. Checked twice: here so the user is told before picking a file,
+    // and again just before the swap, because the timer can start behind the open dialog.
+    const assertIdle = (): void => {
+      if (ctx.timer.getState().status !== 'idle') {
+        throw new Error('Stop the timer before importing — a running session would be written into the replaced data.')
+      }
+    }
+    assertIdle()
+
+    const result = await importJson(BrowserWindow.fromWebContents(e.sender) ?? undefined, {
+      beforeApply: assertIdle
+    })
+    if (result.path !== null) ctx.reloadAfterImport()
+    return result
+  })
 
   // ── system ──
   ipcMain.handle(CH.system.getHotkeyFailures, () => getHotkeyFailures())

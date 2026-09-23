@@ -165,6 +165,16 @@ export function summary(range: StatsRange, now = Date.now()): StatsSummary {
     }
   }
 
+  const completed = db
+    .prepare(
+      `SELECT COUNT(*) AS sessions, COALESCE(SUM(actual_ms), 0) AS focus_ms
+       FROM sessions WHERE ${FOCUS_WHERE} AND completed = 1`
+    )
+    .get(fromMs, toMs)
+
+  const completedSessions = completed ? num(completed, 'sessions') : 0
+  const completedFocusMs = completed ? num(completed, 'focus_ms') : 0
+
   return {
     range,
     focusMs,
@@ -178,7 +188,11 @@ export function summary(range: StatsRange, now = Date.now()): StatsSummary {
        WHERE completed_at IS NOT NULL AND completed_at >= ? AND completed_at <= ?`,
       [fromMs, toMs]
     ),
-    avgFocusMs: focusSessions > 0 ? Math.round(focusMs / focusSessions) : 0,
+    // Mean of COMPLETED focus sessions only — this is the number that shows whether
+    // Flowmodoro is buying longer stretches than Pomodoro, so an abandoned 8-second
+    // session must not drag it down. Deliberately independent of `focusMs`/`focusSessions`
+    // above, which include abandoned sessions on purpose (see file header).
+    avgFocusMs: completedSessions > 0 ? Math.round(completedFocusMs / completedSessions) : 0,
     byMode,
     streakDays: streakDays(now)
   }

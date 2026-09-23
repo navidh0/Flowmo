@@ -583,7 +583,17 @@ export async function exportJson(win?: BrowserWindow): Promise<ExportResult> {
   return { path: result.filePath, sessions: data.sessions.length }
 }
 
-export async function importJson(win?: BrowserWindow): Promise<ImportResult> {
+export interface ImportOptions {
+  /**
+   * Called after the file is chosen and validated, immediately before the backup and
+   * replace. Throw to abort. It exists because the open dialog can sit on screen for as
+   * long as the user likes, and a global hotkey can start the timer behind it — so a check
+   * made before the dialog opened proves nothing by the time the data is swapped.
+   */
+  beforeApply?: () => void
+}
+
+export async function importJson(win?: BrowserWindow, opts: ImportOptions = {}): Promise<ImportResult> {
   const options = { filters: [{ name: 'JSON', extensions: ['json'] }], properties: ['openFile' as const] }
 
   const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
@@ -600,6 +610,8 @@ export async function importJson(win?: BrowserWindow): Promise<ImportResult> {
   const raw: unknown = JSON.parse(readFileSync(filePath, 'utf-8'))
   // Validate BEFORE touching the database — see module doc.
   const file = validateExport(raw)
+
+  opts.beforeApply?.()
 
   const backupPath = backupDatabase()
   const { sessions } = applyImport(file)

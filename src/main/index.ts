@@ -81,7 +81,8 @@ if (!gotLock) {
     registerIpcHandlers({
       timer,
       getSettings: () => settings,
-      applySettingsPatch
+      applySettingsPatch,
+      reloadAfterImport
     })
 
     initNotifications({ getSettings: () => settings })
@@ -235,6 +236,30 @@ function updateProgressBar(state: TimerState): void {
 
   lastProgress = quantised
   win.setProgressBar(quantised, state.status === 'paused' ? { mode: 'paused' } : undefined)
+}
+
+/**
+ * An import swapped the database underneath every cache. Main's copy of settings, and
+ * every side effect derived from it, is re-read and re-applied; the renderers are reloaded
+ * outright, because their stores hold projects, tasks and stats from the old data and
+ * patching each of them would be a second, drift-prone copy of this list. The timer is
+ * guaranteed idle by the import handler, so reloading cannot interrupt a session.
+ */
+function reloadAfterImport(): void {
+  settings = settingsRepo.get()
+
+  // The service mirrors `mode`; idle, this only re-arms it.
+  timer.setMode(settings.mode)
+  reregisterHotkeys(settings)
+  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
+  if (settings.showMiniWidget !== !!getMiniWindow()) setMiniWidget(settings.showMiniWidget)
+
+  broadcast(EV.settingsChanged, settings)
+  updateTray(timer.getState())
+
+  for (const win of [getMainWindow(), getMiniWindow()]) {
+    if (win && !win.webContents.isDestroyed()) win.webContents.reload()
+  }
 }
 
 function toggleStartPause(): void {

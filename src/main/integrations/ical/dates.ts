@@ -3,6 +3,7 @@
  * never `toISOString()` (UTC) and never SQL `date()`/`strftime()` (which treats an epoch
  * value as UTC). See CLAUDE.md: "Calendar boundaries are computed in JS, never in SQL."
  */
+import { CALENDAR_CACHE_DAYS } from '@shared/types'
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n)
@@ -42,8 +43,8 @@ export function localDateKeyToMs(key: string): number {
  */
 export function refreshWindow(
   nowMs: number,
-  pastDays = 14,
-  futureDays = 60
+  pastDays: number = CALENDAR_CACHE_DAYS.past,
+  futureDays: number = CALENDAR_CACHE_DAYS.future
 ): { fromMs: number; toMs: number } {
   const today = startOfLocalDay(nowMs)
   const fromMs = addLocalDays(today, -pastDays).getTime()

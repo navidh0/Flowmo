@@ -16,10 +16,17 @@ import {
   clipToDay,
   dayFraction,
   hourMarks,
+  isInMonth,
   isSameLocalDay,
   layoutOverlaps,
   localDayBounds,
-  shiftLocalDay
+  localWeekBounds,
+  monthAnchor,
+  monthGrid,
+  shiftLocalDay,
+  shiftLocalMonth,
+  shiftLocalWeek,
+  weekDays
 } from '../src/renderer/src/components/timeline/layout'
 
 let originalTz: string | undefined
@@ -228,5 +235,108 @@ describe('layoutOverlaps', () => {
 
   it('is empty for an empty input', () => {
     expect(layoutOverlaps([])).toEqual([])
+  })
+})
+
+describe('localWeekBounds', () => {
+  it('is Monday-first for a mid-week instant', () => {
+    const wed = new Date(2026, 5, 17, 12).getTime() // Wed 17 June 2026
+    const { start, end } = localWeekBounds(wed)
+    expect(new Date(start).getDay()).toBe(1) // Monday
+    expect(start).toBe(new Date(2026, 5, 15).getTime())
+    expect(end).toBe(new Date(2026, 5, 22).getTime())
+  })
+
+  it('is 167 hours for the week containing the spring-forward day', () => {
+    // 8 March 2026 is a Sunday; its Monday-first week is 2-9 March, spanning the transition.
+    const { start, end } = localWeekBounds(new Date(2026, 2, 8, 12).getTime())
+    expect(end - start).toBe(167 * 3_600_000)
+  })
+
+  it('is 169 hours for the week containing the fall-back day', () => {
+    // 1 November 2026 is a Sunday; its Monday-first week is 26 Oct - 2 Nov.
+    const { start, end } = localWeekBounds(new Date(2026, 10, 1, 12).getTime())
+    expect(end - start).toBe(169 * 3_600_000)
+  })
+})
+
+describe('shiftLocalWeek', () => {
+  it('steps by 7 calendar days, across the spring-forward boundary', () => {
+    const monday = new Date(2026, 1, 23, 12).getTime()
+    expect(shiftLocalWeek(monday, 1)).toBe(new Date(2026, 2, 2, 12).getTime())
+  })
+})
+
+describe('weekDays', () => {
+  it('returns 7 local midnights, Monday through Sunday', () => {
+    const days = weekDays(new Date(2026, 5, 17, 9).getTime())
+    expect(days).toHaveLength(7)
+    expect(days.map((d) => new Date(d).getDay())).toEqual([1, 2, 3, 4, 5, 6, 0])
+    expect(days[0]).toBe(new Date(2026, 5, 15).getTime())
+  })
+})
+
+describe('shiftLocalMonth', () => {
+  it('moves by calendar month, normalised to the 1st (no 31 Jan -> March rollover)', () => {
+    const jan31 = new Date(2026, 0, 31, 10).getTime()
+    expect(shiftLocalMonth(jan31, 1)).toBe(new Date(2026, 1, 1).getTime())
+  })
+
+  it('steps backward across a year boundary', () => {
+    const jan15 = new Date(2026, 0, 15).getTime()
+    expect(shiftLocalMonth(jan15, -1)).toBe(new Date(2025, 11, 1).getTime())
+  })
+})
+
+describe('monthGrid', () => {
+  it('is 5 rows for a month starting on Monday (June 2026)', () => {
+    const grid = monthGrid(new Date(2026, 5, 10).getTime())
+    expect(grid.weeks).toHaveLength(5)
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 5, 1).getTime())
+    expect(new Date(grid.weeks[0]![0]!).getDay()).toBe(1)
+  })
+
+  it('is 5 rows for February in a non-leap year starting on Sunday (Feb 2026)', () => {
+    const grid = monthGrid(new Date(2026, 1, 10).getTime())
+    expect(grid.weeks).toHaveLength(5)
+    // Feb 2026 starts on a Sunday: the grid's first row leads with the last Monday of January.
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 0, 26).getTime())
+    expect(grid.weeks[0]?.[6]).toBe(new Date(2026, 1, 1).getTime())
+    const lastWeek = grid.weeks[4]!
+    expect(lastWeek[6]).toBe(new Date(2026, 2, 1).getTime())
+  })
+
+  it('is 6 rows for a month starting on Sunday with 30 days (November 2026)', () => {
+    const grid = monthGrid(new Date(2026, 10, 15).getTime())
+    expect(grid.weeks).toHaveLength(6)
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 9, 26).getTime())
+    const lastWeek = grid.weeks[5]!
+    expect(lastWeek[6]).toBe(new Date(2026, 11, 6).getTime())
+  })
+
+  it('every week has exactly 7 consecutive local days', () => {
+    const grid = monthGrid(new Date(2026, 10, 15).getTime())
+    for (const week of grid.weeks) {
+      expect(week).toHaveLength(7)
+      for (let i = 1; i < week.length; i++) {
+        expect(week[i]).toBe(shiftLocalDay(week[i - 1]!, 1))
+      }
+    }
+  })
+})
+
+describe('monthAnchor / isInMonth', () => {
+  it('anchors to the 1st of the month at local midnight', () => {
+    expect(monthAnchor(new Date(2026, 5, 17, 23, 59).getTime())).toBe(
+      new Date(2026, 5, 1).getTime()
+    )
+  })
+
+  it('tells a grid day in the shown month from a leading/trailing neighbour', () => {
+    const grid = monthGrid(new Date(2026, 1, 10).getTime())
+    const leadingDay = grid.weeks[0]![0]! // 26 Jan, borrowed from January
+    const inMonthDay = grid.weeks[0]![6]! // 1 Feb
+    expect(isInMonth(leadingDay, grid.monthMs)).toBe(false)
+    expect(isInMonth(inMonthDay, grid.monthMs)).toBe(true)
   })
 })

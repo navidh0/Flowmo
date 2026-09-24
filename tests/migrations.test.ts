@@ -55,11 +55,11 @@ function columnNames(handle: DatabaseSync, table: string): string[] {
 }
 
 describe('a fresh database', () => {
-  it('ends at user_version 2 with every v1 and v2 table and column present', () => {
+  it('ends at user_version 3 with every v1/v2/v3 table and column present', () => {
     const handle = openDb()
     runMigrations(handle)
 
-    expect(userVersion(handle)).toBe(2)
+    expect(userVersion(handle)).toBe(3)
 
     const tables = tableNames(handle)
     for (const table of [
@@ -92,6 +92,7 @@ describe('a fresh database', () => {
     expect(columnNames(handle, 'subtasks')).toEqual(
       expect.arrayContaining(['source', 'external_id'])
     )
+    expect(columnNames(handle, 'calendar_events')).toContain('tzid')
 
     // The seeded 'Inbox' project from migration v1 must still be there.
     const inbox = handle.prepare('SELECT name FROM projects').get() as Record<string, unknown>
@@ -133,7 +134,7 @@ describe('upgrading a v1-only database', () => {
     return { projectId, taskId }
   }
 
-  it('preserves every row and leaves the new columns NULL, ending at user_version 2', () => {
+  it('preserves every row and leaves the new columns NULL, ending at the latest version', () => {
     const handle = openDb()
     const { projectId, taskId } = seedV1(handle)
 
@@ -153,7 +154,7 @@ describe('upgrading a v1-only database', () => {
 
     runMigrations(handle)
 
-    expect(userVersion(handle)).toBe(2)
+    expect(userVersion(handle)).toBe(3)
     expect(handle.prepare('SELECT COUNT(*) AS n FROM projects').get()).toEqual(projectsBefore)
     expect(handle.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual(tasksBefore)
     expect(handle.prepare('SELECT COUNT(*) AS n FROM subtasks').get()).toEqual(subtasksBefore)
@@ -182,6 +183,62 @@ describe('upgrading a v1-only database', () => {
     expect(subtask.title).toBe('Outline')
     expect(subtask.source).toBeNull()
     expect(subtask.external_id).toBeNull()
+  })
+})
+
+describe('upgrading a v2 database', () => {
+  function seedV2(handle: DatabaseSync): { feedId: number; eventId: number } {
+    MIGRATIONS[0]!.up(handle)
+    MIGRATIONS[1]!.up(handle)
+    handle.exec('PRAGMA user_version = 2')
+
+    handle
+      .prepare(
+        `INSERT INTO calendar_feeds (name, color, enabled, etag, last_modified, last_ok_at, last_error, created_at)
+         VALUES ('Work', '#22c55e', 1, NULL, NULL, NULL, NULL, ?)`
+      )
+      .run(Date.now())
+    const feedId = Number(
+      handle.prepare('SELECT id FROM calendar_feeds WHERE name = ?').get('Work')!['id']
+    )
+
+    handle
+      .prepare(
+        `INSERT INTO calendar_events (feed_id, uid, title, location, all_day, start_ms, end_ms, start_date, end_date)
+         VALUES (?, 'evt-1@example.com', 'Standup', NULL, 0, 1000, 2000, NULL, NULL)`
+      )
+      .run(feedId)
+    const eventId = Number(
+      handle.prepare('SELECT id FROM calendar_events WHERE uid = ?').get('evt-1@example.com')!['id']
+    )
+
+    return { feedId, eventId }
+  }
+
+  it('adds calendar_events.tzid as NULL and preserves the existing row, ending at user_version 3', () => {
+    const handle = openDb()
+    const { feedId, eventId } = seedV2(handle)
+
+    expect(columnNames(handle, 'calendar_events')).not.toContain('tzid')
+
+    runMigrations(handle)
+
+    expect(userVersion(handle)).toBe(3)
+    expect(columnNames(handle, 'calendar_events')).toContain('tzid')
+
+    const feed = handle.prepare('SELECT * FROM calendar_feeds WHERE id = ?').get(feedId) as Record<
+      string,
+      unknown
+    >
+    expect(feed.name).toBe('Work')
+
+    const event = handle.prepare('SELECT * FROM calendar_events WHERE id = ?').get(eventId) as Record<
+      string,
+      unknown
+    >
+    expect(event.uid).toBe('evt-1@example.com')
+    expect(event.title).toBe('Standup')
+    expect(event.tzid).toBeNull()
   })
 })
 
@@ -240,11 +297,11 @@ describe('idempotency', () => {
   it('running migrations twice is a no-op the second time', () => {
     const handle = openDb()
     runMigrations(handle)
-    expect(userVersion(handle)).toBe(2)
+    expect(userVersion(handle)).toBe(3)
 
     const tablesBefore = tableNames(handle).sort()
     expect(() => runMigrations(handle)).not.toThrow()
-    expect(userVersion(handle)).toBe(2)
+    expect(userVersion(handle)).toBe(3)
     expect(tableNames(handle).sort()).toEqual(tablesBefore)
   })
 })

@@ -15,6 +15,7 @@ import {
   addLocalDays,
   countToday,
   countUpcoming,
+  dueTimeLabel,
   nextLocalMidnight,
   selectToday,
   selectUpcoming
@@ -38,6 +39,8 @@ function task(overrides: Partial<TaskWithStats> = {}): TaskWithStats {
     priority: 3,
     dueDate: null,
     dueTime: null,
+    dueZone: null,
+    dueTimeLocal: null,
     estimatedPomodoros: null,
     sortOrder: id,
     completedAt: null,
@@ -165,6 +168,24 @@ describe('selectToday', () => {
       untimedLowPriority.id
     ])
   })
+
+  it('orders by dueTimeLocal, not the provider-zone dueTime, when they disagree', () => {
+    // "Due 07:15 Tehran" lands at 20:45 the PREVIOUS local evening for this computer — later
+    // in provider-time but far EARLIER in the local day than a plain 08:00 local task.
+    const earlyProviderTimeButLateLocally = task({
+      dueDate: TODAY,
+      dueTime: '07:15',
+      dueZone: 'Asia/Tehran',
+      dueTimeLocal: '20:45',
+      sortOrder: 1
+    })
+    const plainLocal = task({ dueDate: TODAY, dueTime: '08:00', sortOrder: 2 })
+
+    const { today } = selectToday([earlyProviderTimeButLateLocally, plainLocal], TODAY)
+
+    // 08:00 local sorts before 20:45 local, even though 07:15 < 08:00 as raw dueTime strings.
+    expect(today.map((t) => t.id)).toEqual([plainLocal.id, earlyProviderTimeButLateLocally.id])
+  })
 })
 
 describe('countToday', () => {
@@ -212,5 +233,49 @@ describe('countUpcoming', () => {
       task({ dueDate: '2026-06-23' }) // day 8, excluded
     ]
     expect(countUpcoming(tasks, '2026-06-15')).toBe(2)
+  })
+})
+
+describe('dueTimeLabel', () => {
+  it('is null across the board when there is no due time', () => {
+    expect(dueTimeLabel({ dueTime: null, dueZone: null, dueTimeLocal: null })).toEqual({
+      text: null,
+      compact: null,
+      zoneHint: null
+    })
+  })
+
+  it('shows just the time when there is no zone', () => {
+    expect(dueTimeLabel({ dueTime: '19:00', dueZone: null, dueTimeLocal: null })).toEqual({
+      text: '19:00',
+      compact: '19:00',
+      zoneHint: null
+    })
+  })
+
+  it('shows just the time when the zone matches this computer (dueTimeLocal === dueTime)', () => {
+    expect(
+      dueTimeLabel({ dueTime: '19:00', dueZone: 'America/Los_Angeles', dueTimeLocal: '19:00' })
+    ).toEqual({ text: '19:00', compact: '19:00', zoneHint: null })
+  })
+
+  it('shows both clocks, full zone name in `text`, when the zones disagree', () => {
+    expect(
+      dueTimeLabel({ dueTime: '07:15', dueZone: 'Asia/Tehran', dueTimeLocal: '07:45' })
+    ).toEqual({
+      text: '07:15 Tehran · 07:45 local',
+      compact: '07:15 · 07:45 local',
+      zoneHint: 'Tehran'
+    })
+  })
+
+  it('turns underscores into spaces via zoneLabel for multi-word cities', () => {
+    expect(
+      dueTimeLabel({
+        dueTime: '09:00',
+        dueZone: 'America/Argentina/Buenos_Aires',
+        dueTimeLocal: '11:00'
+      }).zoneHint
+    ).toBe('Buenos Aires')
   })
 })

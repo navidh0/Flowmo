@@ -13,7 +13,7 @@ export interface NavBarProps {
 
 const ITEMS: { screen: Screen; label: string; icon: (className: string) => React.JSX.Element }[] = [
   { screen: 'focus', label: 'Focus', icon: (c) => <FocusIcon className={c} /> },
-  { screen: 'day', label: 'Day', icon: (c) => <DayIcon className={c} /> },
+  { screen: 'day', label: 'Calendar', icon: (c) => <DayIcon className={c} /> },
   { screen: 'stats', label: 'Stats', icon: (c) => <StatsIcon className={c} /> },
   { screen: 'settings', label: 'Settings', icon: (c) => <SettingsIcon className={c} /> }
 ]

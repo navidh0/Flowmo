@@ -69,6 +69,8 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     priority: 3,
     dueDate: null,
     dueTime: null,
+    dueZone: null,
+    dueTimeLocal: null,
     estimatedPomodoros: null,
     sortOrder: 0,
     completedAt: null,

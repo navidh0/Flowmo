@@ -18,8 +18,11 @@ if (new Date(2026, 5, 15).getTimezoneOffset() === 0) {
 }
 
 import { parseIcsOccurrences } from '../src/main/integrations/ical/parse'
+import { refreshWindow } from '../src/main/integrations/ical/dates'
+import { CALENDAR_CACHE_DAYS } from '@shared/types'
 
 const fixture = readFileSync(join(__dirname, 'fixtures/basic.ics'), 'utf8')
+const longDaily = readFileSync(join(__dirname, 'fixtures/long-daily.ics'), 'utf8')
 
 // Wide enough to contain every occurrence in the fixture.
 const WINDOW_FROM = Date.UTC(2026, 0, 1)
@@ -45,12 +48,23 @@ describe('parseIcsOccurrences', () => {
     expect(event.startMs).toBe(Date.UTC(2026, 5, 20, 6, 30))
   })
 
-  it('passes a UTC (Z) event through unchanged', () => {
+  it('passes a UTC (Z) event through unchanged and reports no original time zone', () => {
     const events = parseIcsOccurrences(fixture, WINDOW_FROM, WINDOW_TO)
     const event = events.find((e) => e.uid === 'utc-event@flowdo-test')
     expect(event).toBeDefined()
     if (!event || event.allDay) throw new Error('expected a timed event')
     expect(event.startMs).toBe(Date.UTC(2026, 5, 25, 12, 0))
+    expect(event.timeZone).toBeNull()
+  })
+
+  it('carries the IANA zone an event was defined in', () => {
+    const events = parseIcsOccurrences(fixture, WINDOW_FROM, WINDOW_TO)
+    const event = events.find((e) => e.uid === 'tehran-tzid@flowdo-test')
+    expect(event).toBeDefined()
+    if (!event || event.allDay) throw new Error('expected a timed event')
+    // 2026-06-18 10:00 Asia/Tehran (UTC+03:30, no DST since 2022) -> 06:30Z.
+    expect(event.startMs).toBe(Date.UTC(2026, 5, 18, 6, 30))
+    expect(event.timeZone).toBe('Asia/Tehran')
   })
 
   it('expands a weekly RRULE, drops the EXDATE, moves the override, drops the cancelled one', () => {
@@ -108,5 +122,21 @@ describe('parseIcsOccurrences', () => {
     const farFuture = Date.UTC(2030, 0, 1)
     const events = parseIcsOccurrences(fixture, farFuture, farFuture + 86_400_000)
     expect(events).toHaveLength(0)
+  })
+
+  it('expands a long-running daily RRULE over the widened cache window quickly', () => {
+    // The rule has recurred daily since 2020 with no COUNT/UNTIL — expansion cost must come
+    // from the requested window, not from how far back DTSTART is, or this gets slower every
+    // year the feed stays subscribed.
+    const now = Date.UTC(2026, 5, 1)
+    const { fromMs, toMs } = refreshWindow(now)
+
+    const startedAt = performance.now()
+    const events = parseIcsOccurrences(longDaily, fromMs, toMs)
+    const elapsedMs = performance.now() - startedAt
+
+    expect(elapsedMs).toBeLessThan(1000)
+    // One occurrence per local day in [today - past, today + future], inclusive of today.
+    expect(events).toHaveLength(CALENDAR_CACHE_DAYS.past + CALENDAR_CACHE_DAYS.future + 1)
   })
 })

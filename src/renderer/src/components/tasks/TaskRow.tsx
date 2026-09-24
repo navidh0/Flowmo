@@ -28,6 +28,7 @@ import {
   RepeatIcon,
   TodoistIcon
 } from './icons'
+import { dueTimeLabel } from './views'
 import { HOVER_ACTION } from './ui'
 
 export interface RowDrag {
@@ -100,8 +101,11 @@ export function TaskRow({
 }: TaskRowProps): React.JSX.Element {
   const due = formatDueDate(task.dueDate)
   // A provider-supplied time of day ('HH:MM', display/ordering only — never combined with
-  // dueDate into an instant), shown next to the date chip when the due has one.
-  const dueText = due !== null && task.dueTime !== null ? `${due} · ${task.dueTime}` : due
+  // dueDate into an instant), shown next to the date chip when the due has one. Compact form
+  // omits the zone name (there is no room on a row); the full form, with the zone spelled
+  // out, goes in the tooltip below instead.
+  const time = dueTimeLabel(task)
+  const dueText = due !== null && time.compact !== null ? `${due} · ${time.compact}` : due
   // Both sides are 'YYYY-MM-DD' local keys, so a lexical compare is a calendar compare —
   // and never round-trips the date through an instant, which would shift the day.
   const overdue = !completed && task.dueDate !== null && task.dueDate < todayKey
@@ -255,11 +259,7 @@ export function TaskRow({
                   overdue ? <WarningIcon className="h-3 w-3" /> : <CalendarIcon className="h-3 w-3" />
                 }
                 text={dueText}
-                title={
-                  task.dueTime !== null
-                    ? `Due ${task.dueDate} at ${task.dueTime}`
-                    : `Due ${task.dueDate}`
-                }
+                title={time.text !== null ? `Due ${task.dueDate} at ${time.text}` : `Due ${task.dueDate}`}
                 tone={overdue ? 'danger' : dueToday ? 'plain' : 'muted'}
               />
             ) : null}

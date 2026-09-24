@@ -1,19 +1,33 @@
 /**
- * Day-timeline state: one local calendar day's sessions and calendar events, plus project
- * colours and a small task-title cache for the hover/focus card.
+ * Timeline state for Day/Week/Month: sessions and calendar events for whatever range the
+ * current view needs, plus project/feed colours and a small task-title cache for the
+ * hover/focus card.
+ *
+ * One fetch per range (not one per day) — `load()` always asks for `viewRangeBounds(view,
+ * anchorMs)`, which for Week is 7 days and for Month is the full leading/trailing grid, so
+ * switching views or paging never fans out into per-day IPC calls.
  *
  * `calendar.eventsRange` is wired next wave and rejects until then (see integration
  * contract). That must never blank the page — sessions still load and render, and the
  * calendar failure surfaces as a quiet, dismissable note rather than the shared error
- * banner treatment stats/tasks use for a real failure.
+ * banner treatment stats/tasks use for a real failure. Separately, the contract's
+ * `CALENDAR_CACHE_DAYS` bounds how far the cache actually reaches — a range partly or
+ * wholly outside that window gets its own quiet note naming the window, rather than
+ * looking like an empty calendar (see `calendarWindowNote`).
  *
- * Mirrors `stores/stats.ts`'s generation-counter pattern so a day change or a refresh that
- * starts after a newer one cannot resolve fetch handlers set the store back a day.
+ * `view` lives here, not in settings: switching Day/Week/Month is a per-session choice
+ * (CLAUDE.md's settings module is for durable preferences, not view state), so it resets to
+ * 'day' on every fresh load and is never written anywhere.
+ *
+ * Mirrors `stores/stats.ts`'s generation-counter pattern so a range change or a refresh that
+ * starts after a newer one cannot resolve fetch handlers set the store back a step.
  */
 
 import { create } from 'zustand'
+import { CALENDAR_CACHE_DAYS } from '@shared/types'
 import type { CalendarEvent, CalendarFeed, FlowdoApi, Project, Session, TaskWithStats } from '@shared/types'
-import { localDayBounds, shiftLocalDay, type DayBounds } from '../components/timeline/layout'
+import { type DayBounds } from '../components/timeline/layout'
+import { calendarWindowNote, shiftView, viewRangeBounds, type ViewMode } from '../components/timeline/views'
 
 function api(): FlowdoApi | null {
   if (typeof window === 'undefined') return null
@@ -37,17 +51,21 @@ function messageOf(error: unknown): string {
 }
 
 export interface TimelineState {
-  /** Any instant within the day currently shown; bounds are derived from it. */
-  dayMs: number
+  view: ViewMode
+  /** Any instant within the range currently shown; the range itself is derived from it via
+   *  `viewRangeBounds(view, anchorMs)`. */
+  anchorMs: number
   sessions: Session[]
   calendarEvents: CalendarEvent[]
-  /** Non-null when `calendar.eventsRange` failed — shown as a quiet note, not a blank page. */
+  /** Non-null when `calendar.eventsRange` failed outright, OR when the visible range lies
+   *  partly/wholly outside the calendar cache window — either way, a quiet note, never a
+   *  blank calendar. Sessions render regardless. */
   calendarNote: string | null
   /** feedId -> the feed's colour, for painting events by their source calendar. Empty (not
    *  missing) when the feed list failed to load — callers fall back to the shared accent. */
   feedColors: Map<number, string>
   projects: Project[]
-  /** True only for the initial load and a day change, not for a background refresh. */
+  /** True only for the initial load and a range/view change, not for a background refresh. */
   loading: boolean
   /** A real failure loading sessions — unlike `calendarNote`, this is worth a retry action. */
   error: string | null
@@ -58,6 +76,11 @@ export interface TimelineState {
 export interface TimelineActions {
   init: () => Promise<void>
   dispose: () => void
+  setView: (view: ViewMode) => Promise<void>
+  /** Switches to Day view anchored on `dayMs` in one step — what clicking a day in Week or
+   *  Month view does. Two separate `setView`/anchor updates would fetch the wrong range
+   *  once, for the view being left, before fetching again for Day. */
+  goToDay: (dayMs: number) => Promise<void>
   goToday: () => Promise<void>
   goPrev: () => Promise<void>
   goNext: () => Promise<void>
@@ -70,7 +93,8 @@ export interface TimelineActions {
 export type TimelineStore = TimelineState & TimelineActions
 
 const INITIAL: TimelineState = {
-  dayMs: Date.now(),
+  view: 'day',
+  anchorMs: Date.now(),
   sessions: [],
   calendarEvents: [],
   calendarNote: null,
@@ -84,25 +108,21 @@ const INITIAL: TimelineState = {
 
 /** Subscriptions are process-level resources, not state — see stores/tasks.ts. */
 let unsubscribers: Array<() => void> = []
-/** Bumped by dispose()/day changes so a superseded in-flight load is a no-op on arrival. */
+/** Bumped by dispose()/range changes so a superseded in-flight load is a no-op on arrival. */
 let generation = 0
 
-function bounds(dayMs: number): DayBounds {
-  return localDayBounds(dayMs)
-}
-
 export const useTimelineStore = create<TimelineStore>((set, get) => {
-  async function load(dayMs: number, mine: number): Promise<void> {
+  async function load(view: ViewMode, anchorMs: number, mine: number): Promise<void> {
     const bridge = api()
     if (!bridge) {
       set({ error: 'The app bridge is not available yet.', loading: false })
       return
     }
-    const { start, end } = bounds(dayMs)
+    const range: DayBounds = viewRangeBounds(view, anchorMs)
 
     const [sessionsResult, eventsResult, projectsResult, feedsResult] = await Promise.allSettled([
-      bridge.sessions.listRange(start, end),
-      bridge.calendar.eventsRange(start, end),
+      bridge.sessions.listRange(range.start, range.end),
+      bridge.calendar.eventsRange(range.start, range.end),
       bridge.projects.list(),
       bridge.integrations.calendars.list()
     ])
@@ -120,7 +140,10 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
 
     if (eventsResult.status === 'fulfilled') {
       patch.calendarEvents = eventsResult.value
-      patch.calendarNote = null
+      // The fetch succeeded — the only reason to still say something is the visible range
+      // reaching outside what the cache actually covers (a month scrolled far away must not
+      // read as "nothing scheduled" just because the cache never fetched that far).
+      patch.calendarNote = calendarWindowNote(range, Date.now(), CALENDAR_CACHE_DAYS)
     } else {
       patch.calendarEvents = []
       patch.calendarNote = 'Calendars unavailable'
@@ -137,6 +160,12 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
     }
 
     set(patch)
+  }
+
+  async function go(nextView: ViewMode, nextAnchorMs: number): Promise<void> {
+    const mine = ++generation
+    set({ view: nextView, anchorMs: nextAnchorMs, loading: true, taskTitles: new Map() })
+    await load(nextView, nextAnchorMs, mine)
   }
 
   return {
@@ -163,7 +192,7 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
       )
 
       set({ loading: true })
-      await load(get().dayMs, mine)
+      await load(get().view, get().anchorMs, mine)
       if (mine !== generation) return
       set({ ready: true })
     },
@@ -175,29 +204,30 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
       set({ ready: false })
     },
 
+    async setView(view) {
+      if (view === get().view) return
+      await go(view, get().anchorMs)
+    },
+
+    async goToDay(dayMs) {
+      await go('day', dayMs)
+    },
+
     async goToday() {
-      const mine = ++generation
-      set({ dayMs: Date.now(), loading: true, taskTitles: new Map() })
-      await load(get().dayMs, mine)
+      await go(get().view, Date.now())
     },
 
     async goPrev() {
-      const mine = ++generation
-      const dayMs = shiftLocalDay(get().dayMs, -1)
-      set({ dayMs, loading: true, taskTitles: new Map() })
-      await load(dayMs, mine)
+      await go(get().view, shiftView(get().view, get().anchorMs, -1))
     },
 
     async goNext() {
-      const mine = ++generation
-      const dayMs = shiftLocalDay(get().dayMs, 1)
-      set({ dayMs, loading: true, taskTitles: new Map() })
-      await load(dayMs, mine)
+      await go(get().view, shiftView(get().view, get().anchorMs, 1))
     },
 
     async refresh() {
       const mine = generation
-      await load(get().dayMs, mine)
+      await load(get().view, get().anchorMs, mine)
     },
 
     clearError() {

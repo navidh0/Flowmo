@@ -22,7 +22,7 @@ if (new Date(2026, 5, 15).getTimezoneOffset() === 0) {
 const { getPath } = vi.hoisted(() => ({ getPath: vi.fn<(name: string) => string>() }))
 vi.mock('electron', () => ({ app: { getPath: (name: string) => getPath(name) } }))
 
-import { closeDb, dueTimeFromRemoteDue, getDb, wallClockInZone } from '../src/main/db'
+import { closeDb, dueTimeFromRemoteDue, getDb, parseDueTime, wallClockInZone } from '../src/main/db'
 import * as projectsRepo from '../src/main/db/repo/projects'
 import * as tasksRepo from '../src/main/db/repo/tasks'
 
@@ -109,6 +109,66 @@ describe('dueTimeFromRemoteDue', () => {
   })
 })
 
+describe('parseDueTime: dueZone and dueTimeLocal', () => {
+  const originalTz = process.env.TZ
+
+  afterEach(() => {
+    process.env.TZ = originalTz
+  })
+
+  it('the real case: Tehran due read on a Dubai host gives all three fields distinctly', () => {
+    process.env.TZ = 'Asia/Dubai'
+    const remoteDue = JSON.stringify({
+      date: '2026-09-24T03:30:00Z',
+      string: 'every day at 7:00',
+      is_recurring: true,
+      timezone: 'Asia/Tehran'
+    })
+    expect(parseDueTime(remoteDue)).toEqual({
+      dueTime: '07:00',
+      dueZone: 'Asia/Tehran',
+      dueTimeLocal: '07:30'
+    })
+  })
+
+  it('a zone with the same offset as the host gives dueTimeLocal === dueTime', () => {
+    // Asia/Muscat and Asia/Dubai are both fixed +4:00, no DST in either.
+    process.env.TZ = 'Asia/Dubai'
+    const remoteDue = JSON.stringify({
+      date: '2026-09-24T03:30:00Z',
+      string: '7:30am Muscat time',
+      timezone: 'Asia/Muscat'
+    })
+    const result = parseDueTime(remoteDue)
+    expect(result.dueZone).toBe('Asia/Muscat')
+    expect(result.dueTimeLocal).toBe(result.dueTime)
+  })
+
+  it('a floating due has no zone or local-equivalent to report', () => {
+    process.env.TZ = 'Asia/Dubai'
+    const remoteDue = JSON.stringify({ date: '2026-09-24T07:00:00', string: '7am' })
+    expect(parseDueTime(remoteDue)).toEqual({
+      dueTime: '07:00',
+      dueZone: null,
+      dueTimeLocal: null
+    })
+  })
+
+  it('an invalid due.timezone leaves dueZone/dueTimeLocal null even though dueTime falls back', () => {
+    process.env.TZ = 'Asia/Dubai'
+    const remoteDue = JSON.stringify({
+      date: '2026-09-24T03:30:00Z',
+      string: '7:30am',
+      timezone: 'Not/AZone'
+    })
+    expect(parseDueTime(remoteDue)).toEqual({
+      dueTime: '07:30', // host-local (Asia/Dubai) fallback
+      dueZone: null,
+      dueTimeLocal: null
+    })
+  })
+})
+
 describe('wallClockInZone', () => {
   it('reads the wall date and time in the given zone, independent of host TZ', () => {
     // 2026-09-24T03:30:00Z is 07:00 in Asia/Tehran (+3:30).
@@ -142,7 +202,7 @@ describe('tasks repo: dueTime on the mapped task', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('reads back the local HH:MM for a task with a zoned remote_due', () => {
+  it('reads back the local HH:MM for a task with a zoned remote_due (no due.timezone)', () => {
     const project = projectsRepo.create({ name: 'Synced project' })
     const task = tasksRepo.create({ projectId: project.id, title: 'Synced task' })
 
@@ -152,13 +212,42 @@ describe('tasks repo: dueTime on the mapped task', () => {
 
     const reread = tasksRepo.get(task.id)
     expect(reread?.dueTime).toBe('12:00')
+    expect(reread?.dueZone).toBeNull()
+    expect(reread?.dueTimeLocal).toBeNull()
   })
 
-  it('reads null dueTime for a purely local task', () => {
+  it('reads dueZone/dueTimeLocal for a task whose remote_due names an authored timezone', () => {
+    const project = projectsRepo.create({ name: 'Synced project' })
+    const task = tasksRepo.create({ projectId: project.id, title: 'Tehran task' })
+
+    getDb()
+      .prepare('UPDATE tasks SET remote_due = ? WHERE id = ?')
+      .run(
+        JSON.stringify({
+          date: '2026-09-24T03:30:00Z',
+          string: 'every day at 7:00',
+          timezone: 'Asia/Tehran'
+        }),
+        task.id
+      )
+
+    const reread = tasksRepo.get(task.id)
+    expect(reread?.dueTime).toBe('07:00')
+    expect(reread?.dueZone).toBe('Asia/Tehran')
+    // Host TZ for this suite is America/Los_Angeles (PDT, UTC-7): 03:30Z is 20:30 local.
+    expect(reread?.dueTimeLocal).toBe('20:30')
+  })
+
+  it('reads null dueTime/dueZone/dueTimeLocal for a purely local task', () => {
     const project = projectsRepo.create({ name: 'Local project' })
     const task = tasksRepo.create({ projectId: project.id, title: 'Local task' })
 
     expect(task.dueTime).toBeNull()
-    expect(tasksRepo.get(task.id)?.dueTime).toBeNull()
+    expect(task.dueZone).toBeNull()
+    expect(task.dueTimeLocal).toBeNull()
+    const reread = tasksRepo.get(task.id)
+    expect(reread?.dueTime).toBeNull()
+    expect(reread?.dueZone).toBeNull()
+    expect(reread?.dueTimeLocal).toBeNull()
   })
 })

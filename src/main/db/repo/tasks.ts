@@ -1,10 +1,10 @@
 import type { Priority, Project, TaskCreate, TaskUpdate, TaskWithStats } from '@shared/types'
 import {
-  dueTimeFromRemoteDue,
   getDb,
   isRecurring,
   num,
   numOrNull,
+  parseDueTime,
   rowId,
   scalarNum,
   str,
@@ -68,6 +68,11 @@ function toPriority(value: number): Priority {
 }
 
 function mapTask(row: Row): TaskWithStats {
+  // Parsed once so `dueTime`/`dueZone`/`dueTimeLocal` can never disagree with each other —
+  // see `parseDueTime`'s doc in db/index.ts.
+  const remoteDue = strOrNull(row, 'remote_due')
+  const { dueTime, dueZone, dueTimeLocal } = parseDueTime(remoteDue)
+
   return {
     id: num(row, 'id'),
     projectId: num(row, 'project_id'),
@@ -75,14 +80,16 @@ function mapTask(row: Row): TaskWithStats {
     notes: strOrNull(row, 'notes'),
     priority: toPriority(num(row, 'priority')),
     dueDate: strOrNull(row, 'due_date'),
-    dueTime: dueTimeFromRemoteDue(strOrNull(row, 'remote_due')),
+    dueTime,
+    dueZone,
+    dueTimeLocal,
     estimatedPomodoros: numOrNull(row, 'estimated_pomodoros'),
     sortOrder: num(row, 'sort_order'),
     completedAt: numOrNull(row, 'completed_at'),
     createdAt: num(row, 'created_at'),
     source: syncSourceOrNull(row, 'source'),
     externalId: strOrNull(row, 'external_id'),
-    recurring: isRecurring(strOrNull(row, 'remote_due')),
+    recurring: isRecurring(remoteDue),
     remoteDeletedAt: numOrNull(row, 'remote_deleted_at'),
     actualPomodoros: num(row, 'actual_pomodoros'),
     focusMs: num(row, 'focus_ms'),

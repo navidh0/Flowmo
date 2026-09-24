@@ -120,10 +120,11 @@ function mapProject(row: Row): Project {
 }
 
 /**
- * `recurring`, `remoteDeletedAt` and `dueTime` are fixed placeholders here, never read off
- * `remote_due`/`remote_deleted_at` — those sync-bookkeeping columns deliberately never
- * appear in an export (see module doc). The fields exist only so this object satisfies the
- * `Task` shape; `validateExport` does not require them on the way back in.
+ * `recurring`, `remoteDeletedAt`, `dueTime`, `dueZone` and `dueTimeLocal` are fixed
+ * placeholders here, never read off `remote_due`/`remote_deleted_at` — those sync-bookkeeping
+ * columns deliberately never appear in an export (see module doc). The fields exist only so
+ * this object satisfies the `Task` shape; `validateExport` does not require them on the way
+ * back in.
  */
 function mapTask(row: Row): Task {
   return {
@@ -134,6 +135,8 @@ function mapTask(row: Row): Task {
     priority: toPriority(num(row, 'priority')),
     dueDate: strOrNull(row, 'due_date'),
     dueTime: null,
+    dueZone: null,
+    dueTimeLocal: null,
     estimatedPomodoros: numOrNull(row, 'estimated_pomodoros'),
     sortOrder: num(row, 'sort_order'),
     completedAt: numOrNull(row, 'completed_at'),
@@ -397,15 +400,18 @@ function validateTaskRow(
 
   const { source, externalId } = checkSyncOrigin(r, 'tasks', index, seenSyncPairs)
 
-  // `recurring`/`remoteDeletedAt`/`dueTime` are never trusted from the file — see mapTask's
-  // doc. Whatever the file carries for shape compatibility is discarded here, not validated.
+  // `recurring`/`remoteDeletedAt`/`dueTime`/`dueZone`/`dueTimeLocal` are never trusted from
+  // the file — see mapTask's doc. Whatever the file carries for shape compatibility is
+  // discarded here, not validated.
   return {
     ...(r as unknown as Task),
     source,
     externalId,
     recurring: false,
     remoteDeletedAt: null,
-    dueTime: null
+    dueTime: null,
+    dueZone: null,
+    dueTimeLocal: null
   }
 }
 

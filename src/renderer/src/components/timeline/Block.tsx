@@ -10,7 +10,7 @@
 
 import { useTimelineStore } from '@renderer/stores/timeline'
 import { formatDuration } from '@renderer/lib/format'
-import { formatTimeRange } from './format'
+import { formatClockTime, formatEventStart } from './format'
 import type { TimelineBlock } from './blocks'
 
 const KIND_STYLE: Record<TimelineBlock['kind'], string> = {
@@ -43,7 +43,12 @@ export function Block({
   const taskTitle = block.taskId !== null ? getTaskTitle(block.taskId) : null
 
   const durationMs = block.endMs - block.startMs
-  const timeRange = formatTimeRange(block.startMs, block.endMs, block.continues)
+  // The END always reads in local time — only the START also carries the event's own zone
+  // when that reads differently (`formatEventStart`); positioning itself never changes, only
+  // this label. Sessions/running blocks have `timeZone: null`, so this is just the local
+  // start for them, same as before.
+  const startLabel = formatEventStart(block.startMs, block.timeZone)
+  const timeRange = `${startLabel} – ${formatClockTime(block.endMs)}${block.continues ? ' (continues past midnight)' : ''}`
   const label = [
     block.title,
     taskTitle ? `Task: ${taskTitle}` : null,

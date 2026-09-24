@@ -48,7 +48,7 @@ vi.mock('../src/main/credentials', () => ({
 
 import { closeDb, getDb } from '../src/main/db'
 import { createCalendarIntegration, type CalendarIntegration } from '../src/main/integrations/ical'
-import type { DataChangedScope } from '@shared/types'
+import { CALENDAR_CACHE_DAYS, type DataChangedScope } from '@shared/types'
 
 const fixture = readFileSync(join(__dirname, 'fixtures/basic.ics'), 'utf8')
 
@@ -58,8 +58,9 @@ let nowMs: number
 let fetchMock: ReturnType<typeof vi.fn>
 let integration: CalendarIntegration
 
-// 2026-06-01 local noon: the refresh window [today-14, today+60] then covers every date used
-// in the fixture (2026-06-01 .. 2026-07-06).
+// 2026-06-01 local noon: the refresh window [today - CALENDAR_CACHE_DAYS.past,
+// today + CALENDAR_CACHE_DAYS.future] then covers every date used in the fixture
+// (2026-06-01 .. 2026-07-06).
 const FIXED_NOW = new Date(2026, 5, 1, 12, 0, 0).getTime()
 
 function icsResponse(
@@ -191,6 +192,22 @@ describe('eventsRange', () => {
     expect(onThe4th.some((e) => e.title === 'Single all-day event')).toBe(false)
   })
 
+  it('carries the original time zone on a timed event and null for UTC/floating', async () => {
+    await addFixtureFeed()
+
+    const events = integration.eventsRange(Date.UTC(2026, 5, 1), Date.UTC(2026, 6, 10))
+
+    const tehran = events.find((e) => e.title === 'Timed event in Asia/Tehran')
+    expect(tehran).toBeDefined()
+    if (!tehran || tehran.allDay) throw new Error('expected a timed event')
+    expect(tehran.timeZone).toBe('Asia/Tehran')
+
+    const utc = events.find((e) => e.title === 'UTC event')
+    expect(utc).toBeDefined()
+    if (!utc || utc.allDay) throw new Error('expected a timed event')
+    expect(utc.timeZone).toBeNull()
+  })
+
   it('returns the moved override at its moved time and not the original slot', async () => {
     await addFixtureFeed()
 
@@ -300,6 +317,40 @@ describe('refreshNow', () => {
     const b = feeds.find((f) => f.id === feedB.id)
     expect(a?.lastError).toBeNull()
     expect(b?.lastError).toBeTruthy()
+  })
+
+  it('replaces a narrower stale cache wholesale with the wider CALENDAR_CACHE_DAYS window', async () => {
+    const longDaily = readFileSync(join(__dirname, 'fixtures/long-daily.ics'), 'utf8')
+    fetchMock.mockResolvedValueOnce(icsResponse(longDaily))
+    const feed = await integration.add({ name: 'Daily', url: 'https://example.com/daily.ics' })
+
+    // Simulate rows left over from a version that cached a much narrower window (as if this
+    // feed had been added before CALENDAR_CACHE_DAYS widened): delete everything outside a
+    // 14/60-day range around `now`, the old default.
+    const oldFrom = new Date(2026, 4, 18).getTime() // 2026-06-01 minus 14 days
+    const oldToExclusive = new Date(2026, 6, 1).getTime() // 2026-06-01 plus 60 days (exclusive+1 boundary)
+    getDb()
+      .prepare('DELETE FROM calendar_events WHERE feed_id = ? AND (start_ms < ? OR start_ms >= ?)')
+      .run(feed.id, oldFrom, oldToExclusive)
+
+    const narrowedCount = getDb()
+      .prepare('SELECT COUNT(*) AS c FROM calendar_events WHERE feed_id = ?')
+      .get(feed.id) as Record<string, unknown>
+    expect(Number(narrowedCount['c'])).toBeLessThan(
+      CALENDAR_CACHE_DAYS.past + CALENDAR_CACHE_DAYS.future + 1
+    )
+
+    fetchMock.mockResolvedValueOnce(icsResponse(longDaily))
+    await integration.refreshNow()
+
+    const rows = getDb()
+      .prepare('SELECT start_ms FROM calendar_events WHERE feed_id = ? ORDER BY start_ms')
+      .all(feed.id) as Array<Record<string, unknown>>
+    // The wholesale per-feed replace means the row count matches the CURRENT (wide) window
+    // exactly — no leftover narrow-cache rows, and no duplicates from the two expansions.
+    expect(rows).toHaveLength(CALENDAR_CACHE_DAYS.past + CALENDAR_CACHE_DAYS.future + 1)
+    const uniqueStarts = new Set(rows.map((r) => Number(r['start_ms'])))
+    expect(uniqueStarts.size).toBe(rows.length)
   })
 })
 

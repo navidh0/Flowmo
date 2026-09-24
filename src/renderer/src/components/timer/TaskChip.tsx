@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useTasksBootstrap } from '@renderer/components/tasks/bootstrap'
-import { selectToday } from '@renderer/components/tasks/views'
+import { dueTimeLabel, selectToday, type DueTimeParts } from '@renderer/components/tasks/views'
 import { PRIORITY_VAR } from '../../lib/format'
 import { useTasksStore } from '../../stores/tasks'
 import { timerActions } from '../../stores/timer'
@@ -67,6 +67,7 @@ export function TaskChip(): React.JSX.Element {
   // An ellipsis rather than "Loading…": the fetch resolves in a frame or two and a word that
   // appears and vanishes draws more attention than the title it is standing in for.
   const label = attached ? (task?.title ?? '…') : 'No task'
+  const chipDueTime = task ? dueTimeLabel(task) : null
 
   return (
     <div className="relative" ref={rootRef}>
@@ -95,9 +96,20 @@ export function TaskChip(): React.JSX.Element {
 
           <span
             className={`truncate ${attached ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`}
-            title={attached ? (task?.title ?? undefined) : undefined}
+            title={
+              attached
+                ? chipDueTime?.text !== null && chipDueTime?.text !== undefined
+                  ? `${task?.title ?? ''} · Due ${chipDueTime.text}`
+                  : (task?.title ?? undefined)
+                : undefined
+            }
           >
             {label}
+            {chipDueTime?.compact !== null && chipDueTime?.compact !== undefined ? (
+              <span className="ml-1.5 text-[var(--color-text-muted)]">
+                · {chipDueTime.compact}
+              </span>
+            ) : null}
           </span>
         </button>
 
@@ -191,17 +203,19 @@ function TaskOption({
   active,
   onPick
 }: {
-  task: { id: number; title: string; priority: 1 | 2 | 3 | 4 }
+  task: { id: number; title: string; priority: 1 | 2 | 3 | 4 } & DueTimeParts
   project: { name: string; color: string } | undefined
   active: boolean
   onPick: () => void
 }): React.JSX.Element {
+  const due = dueTimeLabel(task)
   return (
     <button
       type="button"
       role="option"
       aria-selected={active}
       onClick={onPick}
+      title={due.text !== null ? `${task.title} · Due ${due.text}` : task.title}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] outline-none focus-visible:bg-[var(--color-surface-sunken)] ${
         active
           ? 'bg-[var(--color-surface-sunken)] text-[var(--color-text)]'
@@ -214,6 +228,11 @@ function TaskOption({
         aria-hidden="true"
       />
       <span className="min-w-0 flex-1 truncate">{task.title}</span>
+      {due.compact !== null ? (
+        <span className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
+          {due.compact}
+        </span>
+      ) : null}
       {project ? (
         <span
           className="h-[7px] w-[7px] shrink-0 rounded-full"

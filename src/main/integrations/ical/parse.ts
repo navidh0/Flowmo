@@ -32,6 +32,7 @@
  */
 import ical from 'node-ical'
 import type { VEvent } from 'node-ical'
+import { resolveTimeZone } from './timezone'
 
 export type RawOccurrence =
   | {
@@ -41,6 +42,8 @@ export type RawOccurrence =
       allDay: false
       startMs: number
       endMs: number
+      /** IANA zone the event was defined in, or null for UTC/floating. See `timezone.ts`. */
+      timeZone: string | null
     }
   | {
       uid: string
@@ -126,13 +129,17 @@ export function parseIcsOccurrences(
           endDate: localDateKey(inst.end)
         })
       } else {
+        // Read per-occurrence, not per-event: a RECURRENCE-ID override in a different zone
+        // than its master must carry its OWN zone, and `inst.start` already is the override's
+        // own start when this instance is one.
         out.push({
           uid,
           title,
           location,
           allDay: false,
           startMs: inst.start.getTime(),
-          endMs: inst.end.getTime()
+          endMs: inst.end.getTime(),
+          timeZone: resolveTimeZone(inst.start.tz)
         })
       }
     }

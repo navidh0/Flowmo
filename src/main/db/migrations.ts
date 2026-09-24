@@ -185,6 +185,15 @@ export const MIGRATIONS: readonly Migration[] = [
         CREATE INDEX idx_calendar_events_date  ON calendar_events(start_date);
       `)
     }
+  },
+  {
+    // The zone a timed calendar event was defined in, so its original time can be shown
+    // next to local time when the two differ. Existing cached rows read NULL until the
+    // next refresh rewrites them, which is harmless: the label falls back to local only.
+    version: 3,
+    up(db) {
+      db.exec('ALTER TABLE calendar_events ADD COLUMN tzid TEXT')
+    }
   }
 ]
 

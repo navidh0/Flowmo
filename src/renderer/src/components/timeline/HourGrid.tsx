@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { dayFraction, hourMarks, layoutOverlaps, type DayBounds } from './layout'
-import { formatHourLabel } from './format'
+import { formatHourMark } from './format'
 import { Block } from './Block'
 import type { TimelineBlock } from './blocks'
 
@@ -65,7 +65,7 @@ export function HourGrid({ bounds, blocks, isToday }: HourGridProps): React.JSX.
               style={{ height: `${ROW_HEIGHT_PX}px` }}
             >
               <span className="absolute -top-2 right-1.5 text-[10px] text-[var(--color-text-muted)]">
-                {formatHourLabel(mark.hour)}
+                {formatHourMark(mark.hour)}
               </span>
             </div>
           ))}

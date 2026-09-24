@@ -1,21 +1,21 @@
 /**
- * The day view: logged sessions and calendar events on one timeline for a single local day.
+ * The Calendar screen: Day / Week / Month views over one local range of logged sessions and
+ * calendar events.
  *
  * Owns its own data lifecycle (init/dispose on mount/unmount), same as `StatsPage`, so it
  * can be dropped anywhere behind `React.lazy` without the shell knowing about
  * `stores/timeline`.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { Button } from '@renderer/components/timer/Button'
 import { useTimelineStore } from '@renderer/stores/timeline'
 import { useTimerStore } from '@renderer/stores/timer'
-import { AllDayRow } from './AllDayRow'
-import { eventBlocks, runningBlock, sessionBlocks } from './blocks'
-import { EmptyDay } from './EmptyDay'
+import { DayView } from './DayView'
+import { WeekView } from './WeekView'
+import { MonthView } from './MonthView'
 import { Header } from './Header'
-import { HourGrid } from './HourGrid'
-import { isSameLocalDay, localDayBounds } from './layout'
+import { isSameLocalDay } from './layout'
 import { WarningIcon } from './icons'
 
 function Skeleton(): React.JSX.Element {
@@ -28,7 +28,8 @@ function Skeleton(): React.JSX.Element {
 }
 
 export function TimelinePage(): React.JSX.Element {
-  const dayMs = useTimelineStore((s) => s.dayMs)
+  const view = useTimelineStore((s) => s.view)
+  const anchorMs = useTimelineStore((s) => s.anchorMs)
   const sessions = useTimelineStore((s) => s.sessions)
   const calendarEvents = useTimelineStore((s) => s.calendarEvents)
   const calendarNote = useTimelineStore((s) => s.calendarNote)
@@ -39,6 +40,8 @@ export function TimelinePage(): React.JSX.Element {
   const error = useTimelineStore((s) => s.error)
   const init = useTimelineStore((s) => s.init)
   const dispose = useTimelineStore((s) => s.dispose)
+  const setView = useTimelineStore((s) => s.setView)
+  const goToDay = useTimelineStore((s) => s.goToDay)
   const goToday = useTimelineStore((s) => s.goToday)
   const goPrev = useTimelineStore((s) => s.goPrev)
   const goNext = useTimelineStore((s) => s.goNext)
@@ -54,23 +57,19 @@ export function TimelinePage(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const bounds = useMemo(() => localDayBounds(dayMs), [dayMs])
-  const isToday = useMemo(() => isSameLocalDay(Date.now(), dayMs), [dayMs])
-
-  const blocks = useMemo(() => {
-    const running = runningBlock(timerState, projects, bounds)
-    return [
-      ...sessionBlocks(sessions, projects, bounds),
-      ...eventBlocks(calendarEvents, bounds, feedColors),
-      ...(running ? [running] : [])
-    ]
-  }, [sessions, calendarEvents, feedColors, projects, bounds, timerState])
-
-  const isEmpty = ready && blocks.length === 0 && calendarEvents.length === 0
+  const isToday = view === 'day' ? isSameLocalDay(Date.now(), anchorMs) : false
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header dayMs={dayMs} isToday={isToday} onPrev={() => void goPrev()} onNext={() => void goNext()} onToday={() => void goToday()} />
+      <Header
+        view={view}
+        onViewChange={(v) => void setView(v)}
+        anchorMs={anchorMs}
+        isToday={isToday}
+        onPrev={() => void goPrev()}
+        onNext={() => void goNext()}
+        onToday={() => void goToday()}
+      />
 
       {error ? (
         <div
@@ -95,11 +94,35 @@ export function TimelinePage(): React.JSX.Element {
 
       {!ready && loading ? (
         <Skeleton />
+      ) : view === 'day' ? (
+        <DayView
+          dayMs={anchorMs}
+          sessions={sessions}
+          calendarEvents={calendarEvents}
+          feedColors={feedColors}
+          projects={projects}
+          timerState={timerState}
+          ready={ready}
+        />
+      ) : view === 'week' ? (
+        <WeekView
+          anchorMs={anchorMs}
+          sessions={sessions}
+          calendarEvents={calendarEvents}
+          feedColors={feedColors}
+          projects={projects}
+          timerState={timerState}
+          onSelectDay={(dayMs) => void goToDay(dayMs)}
+        />
       ) : (
-        <>
-          <AllDayRow dayMs={dayMs} events={calendarEvents} feedColors={feedColors} />
-          {isEmpty ? <EmptyDay /> : <HourGrid bounds={bounds} blocks={blocks} isToday={isToday} />}
-        </>
+        <MonthView
+          anchorMs={anchorMs}
+          sessions={sessions}
+          calendarEvents={calendarEvents}
+          feedColors={feedColors}
+          projects={projects}
+          onSelectDay={(dayMs) => void goToDay(dayMs)}
+        />
       )}
     </div>
   )

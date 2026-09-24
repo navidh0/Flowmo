@@ -144,6 +144,90 @@ export function layoutOverlaps<T extends OverlapInterval>(items: T[]): OverlapPl
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Week and month ranges
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** JS `Date#getDay()` for the week's first day: 1 = Monday. The single constant so "which
+ *  day starts the week" is never hard-coded a second way somewhere else. */
+export const WEEK_STARTS_ON = 1
+
+/** 0 for the week's first day (Monday), 6 for its last (Sunday), regardless of
+ *  `Date#getDay()`'s Sunday-first numbering. */
+function weekdayIndex(d: Date): number {
+  return (d.getDay() - WEEK_STARTS_ON + 7) % 7
+}
+
+/** The Monday-first local week containing `ms`, as `[Monday 00:00, next Monday 00:00)`.
+ *  Length is 7 real calendar days, but NOT necessarily 168 hours — a week straddling a DST
+ *  transition is 167 or 169 hours, exactly like a day is 23 or 25. */
+export function localWeekBounds(ms: number): DayBounds {
+  const day = localDayBounds(ms)
+  const start = shiftLocalDay(day.start, -weekdayIndex(new Date(day.start)))
+  const end = shiftLocalDay(start, 7)
+  return { start, end }
+}
+
+/** `ms` moved `deltaWeeks` local calendar weeks. */
+export function shiftLocalWeek(ms: number, deltaWeeks: number): number {
+  return shiftLocalDay(ms, deltaWeeks * 7)
+}
+
+/** Local midnight of each of the 7 days in the Monday-first week containing `ms`. */
+export function weekDays(ms: number): number[] {
+  const { start } = localWeekBounds(ms)
+  return Array.from({ length: 7 }, (_, i) => shiftLocalDay(start, i))
+}
+
+/** Local midnight of the 1st of the month containing `ms`. */
+export function monthAnchor(ms: number): number {
+  const d = new Date(ms)
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+}
+
+/** `ms` moved `deltaMonths` local calendar months, normalised to the 1st first — going via
+ *  the day-of-month would let e.g. 31 Jan + 1 month roll into March instead of February. */
+export function shiftLocalMonth(ms: number, deltaMonths: number): number {
+  const d = new Date(monthAnchor(ms))
+  d.setMonth(d.getMonth() + deltaMonths)
+  return d.getTime()
+}
+
+export interface MonthGrid {
+  /** Local midnight of the 1st of the shown month. */
+  monthMs: number
+  /** Monday-first weeks (each 7 local-midnight day anchors) covering the whole month —
+   *  4 to 6 rows depending on the month's length and which weekday it starts on. Leading/
+   *  trailing entries belong to the adjacent month; `isInMonth` tells them apart. */
+  weeks: number[][]
+}
+
+/** The calendar-grid weeks covering the month containing `ms`, Monday-first, with enough
+ *  leading/trailing days from adjacent months to fill whole weeks. */
+export function monthGrid(ms: number): MonthGrid {
+  const monthMs = monthAnchor(ms)
+  const firstOfMonth = new Date(monthMs)
+  const daysInMonth = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() + 1, 0).getDate()
+  const leading = weekdayIndex(firstOfMonth)
+  const rows = Math.ceil((leading + daysInMonth) / 7)
+
+  const gridStart = shiftLocalDay(monthMs, -leading)
+  const weeks: number[][] = []
+  for (let row = 0; row < rows; row++) {
+    weeks.push(Array.from({ length: 7 }, (_, col) => shiftLocalDay(gridStart, row * 7 + col)))
+  }
+  return { monthMs, weeks }
+}
+
+/** True when `dayMs` falls in the same local calendar month as `monthMs` (any instant in
+ *  that month, typically its anchor) — distinguishes a grid cell's own month from the
+ *  dimmed leading/trailing days borrowed from its neighbours. */
+export function isInMonth(dayMs: number, monthMs: number): boolean {
+  const a = new Date(dayMs)
+  const b = new Date(monthMs)
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Clipping a session that runs past the day's end
 // ─────────────────────────────────────────────────────────────────────────────
 

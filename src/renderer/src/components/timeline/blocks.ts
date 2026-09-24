@@ -22,6 +22,10 @@ export interface TimelineBlock extends OverlapInterval {
   abandoned: boolean
   /** Present for calendar-event blocks. */
   location: string | null
+  /** The IANA zone a calendar event was defined in, or null for a session/running block (no
+   *  such concept) or a floating/UTC event. Positioning never uses this — only the label,
+   *  via `formatEventStart` — see its own doc for why. */
+  timeZone: string | null
 }
 
 const NEUTRAL = 'var(--color-text-muted)'
@@ -52,7 +56,8 @@ export function sessionBlocks(
       color: isBreak ? BREAK_COLOR : projectColor(s.projectId, projects),
       taskId: s.taskId,
       abandoned: !isBreak && !s.completed,
-      location: null
+      location: null,
+      timeZone: null
     }
   })
 }
@@ -82,7 +87,8 @@ export function runningBlock(
     color: isBreak ? BREAK_COLOR : projectColor(state.projectId, projects),
     taskId: state.taskId,
     abandoned: false,
-    location: null
+    location: null,
+    timeZone: null
   }
 }
 
@@ -95,7 +101,11 @@ export function eventColor(feedId: number, feedColors: Map<number, string>): str
 }
 
 /** Timed calendar events overlapping the day, clipped the same way a session is. All-day
- *  events are handled separately by the all-day row, never mixed into the hour grid. */
+ *  events are handled separately by the all-day row, never mixed into the hour grid.
+ *
+ * Filters to events that actually overlap `bounds` first — required once the caller fetches
+ * a whole week/month in one call (see `stores/timeline.ts`) rather than one day at a time,
+ * or every event in the visible range would render on every day of it. */
 export function eventBlocks(
   events: CalendarEvent[],
   bounds: DayBounds,
@@ -103,6 +113,7 @@ export function eventBlocks(
 ): TimelineBlock[] {
   return events
     .filter((e): e is Extract<CalendarEvent, { allDay: false }> => !e.allDay)
+    .filter((e) => e.startMs < bounds.end && e.endMs > bounds.start)
     .map((e) => {
       const clipped = clipToDay(Math.max(e.startMs, bounds.start), e.endMs, bounds)
       return {
@@ -115,7 +126,8 @@ export function eventBlocks(
         color: eventColor(e.feedId, feedColors),
         taskId: null,
         abandoned: false,
-        location: e.location
+        location: e.location,
+        timeZone: e.timeZone
       }
     })
 }

@@ -62,14 +62,25 @@ export function listEnabledFeedIds(): number[] {
 function insertEvents(db: DatabaseSync, feedId: number, events: RawOccurrence[]): void {
   db.prepare('DELETE FROM calendar_events WHERE feed_id = ?').run(feedId)
   const stmt = db.prepare(
-    `INSERT INTO calendar_events (feed_id, uid, title, location, all_day, start_ms, end_ms, start_date, end_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO calendar_events (feed_id, uid, title, location, all_day, start_ms, end_ms, start_date, end_date, tzid)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
   for (const event of events) {
     if (event.allDay) {
-      stmt.run(feedId, event.uid, event.title, event.location, 1, null, null, event.startDate, event.endDate)
+      stmt.run(feedId, event.uid, event.title, event.location, 1, null, null, event.startDate, event.endDate, null)
     } else {
-      stmt.run(feedId, event.uid, event.title, event.location, 0, event.startMs, event.endMs, null, null)
+      stmt.run(
+        feedId,
+        event.uid,
+        event.title,
+        event.location,
+        0,
+        event.startMs,
+        event.endMs,
+        null,
+        null,
+        event.timeZone
+      )
     }
   }
 }
@@ -147,12 +158,13 @@ function canonicalEventRow(row: Row): unknown {
     startMs: numOrNull(row, 'start_ms'),
     endMs: numOrNull(row, 'end_ms'),
     startDate: strOrNull(row, 'start_date'),
-    endDate: strOrNull(row, 'end_date')
+    endDate: strOrNull(row, 'end_date'),
+    tzid: strOrNull(row, 'tzid')
   }
 }
 
 const EVENT_COLUMNS =
-  'uid, title, location, all_day, start_ms, end_ms, start_date, end_date'
+  'uid, title, location, all_day, start_ms, end_ms, start_date, end_date, tzid'
 
 /**
  * Replace a feed's cached events wholesale, in one transaction, and record the successful
@@ -239,7 +251,8 @@ export function eventsRange(fromMs: number, toMs: number): CalendarEvent[] {
     location: strOrNull(row, 'location'),
     allDay: false,
     startMs: num(row, 'start_ms'),
-    endMs: num(row, 'end_ms')
+    endMs: num(row, 'end_ms'),
+    timeZone: strOrNull(row, 'tzid')
   }))
 
   const allDay: CalendarEvent[] = allDayRows.map((row) => ({

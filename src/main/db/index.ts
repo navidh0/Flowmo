@@ -222,45 +222,68 @@ export function wallClockInZone(
   }
 }
 
+/** The three due-time fields `Task` carries, always derived together — see `parseDueTime`. */
+export interface DueTimeFields {
+  dueTime: string | null
+  dueZone: string | null
+  dueTimeLocal: string | null
+}
+
+const NO_DUE_TIME: DueTimeFields = { dueTime: null, dueZone: null, dueTimeLocal: null }
+
 /**
- * Extract the wall-clock 'HH:MM' from a Todoist `due` object's JSON, or `null` when the due
- * has no time component (or the JSON is malformed/unexpected).
+ * Parse a Todoist `due` object's JSON into the three due-time fields `Task` carries, in one
+ * pass so they can never disagree with each other:
+ *
+ *  - `dueTime` — the wall-clock 'HH:MM' the due was authored at (in `due.timezone` when a
+ *    zoned due names one, otherwise the host's own zone — see below).
+ *  - `dueZone` — the IANA zone `dueTime` is expressed in, but ONLY for a zoned due with a
+ *    recognised `due.timezone`; `null` for date-only, floating, or a zoned due whose
+ *    `timezone` is missing/invalid (there `dueTime` still gets a value, via host-local
+ *    fallback, but there is no named zone to report it in).
+ *  - `dueTimeLocal` — the same instant read on THIS computer's own clock, so the UI can show
+ *    both ("07:15 Tehran · 07:45 local") when they differ. Always `null` when `dueZone` is
+ *    `null` — with no distinct authored zone there is nothing to disambiguate from `dueTime`.
  *
  * `due.date` comes in three shapes:
- *  - 'YYYY-MM-DD' — date-only, no time → `null`.
+ *  - 'YYYY-MM-DD' — date-only, no time → all three `null`.
  *  - floating 'YYYY-MM-DDTHH:MM:SS' (no offset, no trailing `Z`) — there is no instant to
- *    convert, so the HH:MM is taken verbatim, exactly as `due_date`'s own local-day mapping
- *    treats a floating value.
- *  - zoned 'YYYY-MM-DDTHH:MM:SSZ' or with a `±HH:MM` offset — a real instant. Todoist also
- *    sends the zone the due was authored in as `due.timezone`; when present and a valid
- *    IANA name, the wall time is read back IN THAT ZONE via `wallClockInZone` — this is the
- *    time the user actually set (and what `due.string` describes), which can differ from
- *    the host machine's own zone even when both are "close" (Asia/Tehran vs Asia/Dubai is a
- *    30-minute, non-hour-boundary difference). Only when `timezone` is absent or invalid
- *    does this fall back to the HOST's local zone via `Date`, as before.
+ *    convert, so `dueTime` is the HH:MM verbatim (exactly as `due_date`'s own local-day
+ *    mapping treats a floating value), and `dueZone`/`dueTimeLocal` are `null` — a floating
+ *    time has no zone to name.
+ *  - zoned 'YYYY-MM-DDTHH:MM:SSZ' or with a `±HH:MM` offset — a real instant.
+ *      - When `due.timezone` is present and a valid IANA name: `dueTime` is the wall time IN
+ *        THAT ZONE via `wallClockInZone` (the time the user actually set, and what
+ *        `due.string` describes — this can differ from the host's own zone even between
+ *        "close" zones on a non-hour offset, e.g. Asia/Tehran vs Asia/Dubai). `dueZone` is
+ *        that same timezone name. `dueTimeLocal` is the host-local HH:MM for the same
+ *        instant, via `Date.getHours()/getMinutes()`.
+ *      - Otherwise (timezone absent/invalid): `dueTime` falls back to the HOST's local zone,
+ *        same as `dueTimeLocal` would have been — but `dueZone`/`dueTimeLocal` both stay
+ *        `null`, since there is no authored zone distinct from the host to report.
  *
- * Never throws: malformed or unrecognised input degrades to `null`, same policy as
+ * Never throws: malformed or unrecognised input degrades to all-`null`, same policy as
  * `isRecurring` above.
  */
-export function dueTimeFromRemoteDue(remoteDueJson: string | null): string | null {
-  if (remoteDueJson === null) return null
+export function parseDueTime(remoteDueJson: string | null): DueTimeFields {
+  if (remoteDueJson === null) return NO_DUE_TIME
   try {
     const parsed: unknown = JSON.parse(remoteDueJson)
-    if (typeof parsed !== 'object' || parsed === null) return null
+    if (typeof parsed !== 'object' || parsed === null) return NO_DUE_TIME
     const record = parsed as Record<string, unknown>
     const date = record.date
-    if (typeof date !== 'string') return null
+    if (typeof date !== 'string') return NO_DUE_TIME
 
     // Date-only: no time component at all.
     const dateOnly = /^\d{4}-\d{2}-\d{2}$/
-    if (dateOnly.test(date)) return null
+    if (dateOnly.test(date)) return NO_DUE_TIME
 
     // Floating datetime: no trailing Z and no +/-HH:MM offset after the time.
     const floating = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2}):\d{2}$/
     const floatingMatch = floating.exec(date)
     if (floatingMatch) {
       const [, hh, mm] = floatingMatch
-      return `${hh}:${mm}`
+      return { dueTime: `${hh}:${mm}`, dueZone: null, dueTimeLocal: null }
     }
 
     // Zoned datetime: trailing Z or a +/-HH:MM offset. Convert via a real Date so the
@@ -268,20 +291,28 @@ export function dueTimeFromRemoteDue(remoteDueJson: string | null): string | nul
     const zoned = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/
     if (zoned.test(date)) {
       const instant = new Date(date)
-      if (Number.isNaN(instant.getTime())) return null
+      if (Number.isNaN(instant.getTime())) return NO_DUE_TIME
+      const hostLocal = `${pad2(instant.getHours())}:${pad2(instant.getMinutes())}`
 
       const timezone = record.timezone
       if (typeof timezone === 'string' && timezone.length > 0) {
         const wall = wallClockInZone(instant.getTime(), timezone)
-        if (wall) return wall.hhmm
+        if (wall) {
+          return { dueTime: wall.hhmm, dueZone: timezone, dueTimeLocal: hostLocal }
+        }
         // Invalid/unrecognised IANA name: fall through to host-local below.
       }
 
-      return `${pad2(instant.getHours())}:${pad2(instant.getMinutes())}`
+      return { dueTime: hostLocal, dueZone: null, dueTimeLocal: null }
     }
 
-    return null
+    return NO_DUE_TIME
   } catch {
-    return null
+    return NO_DUE_TIME
   }
+}
+
+/** Back-compat single-field accessor, kept for call sites that only need `dueTime`. */
+export function dueTimeFromRemoteDue(remoteDueJson: string | null): string | null {
+  return parseDueTime(remoteDueJson).dueTime
 }

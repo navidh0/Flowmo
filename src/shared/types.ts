@@ -279,6 +279,17 @@ export interface Task extends SyncOrigin {
    * dueDate is not an instant. Derived from the provider's due object; not editable.
    */
   dueTime: string | null
+  /**
+   * IANA zone the due time is defined in (Todoist's due.timezone), e.g. 'Asia/Tehran'.
+   * Null for date-only, floating (zone-less) and local tasks. With `dueTimeLocal` it lets
+   * the UI show both "07:15 Tehran" and "07:45 local" when the two clocks disagree.
+   */
+  dueZone: string | null
+  /**
+   * The same moment as `dueTime`/`dueZone`, on THIS computer's clock, 'HH:MM'. Equal to
+   * `dueTime` when the zones agree; null whenever `dueZone` is null. Display only.
+   */
+  dueTimeLocal: string | null
   estimatedPomodoros: number | null
   sortOrder: number
   completedAt: number | null
@@ -302,7 +313,7 @@ export interface TaskCreate {
 }
 
 export type TaskUpdate = Partial<
-  Omit<Task, 'id' | 'createdAt' | 'recurring' | 'remoteDeletedAt' | 'dueTime' | keyof SyncOrigin>
+  Omit<Task, 'id' | 'createdAt' | 'recurring' | 'remoteDeletedAt' | 'dueTime' | 'dueZone' | 'dueTimeLocal' | keyof SyncOrigin>
 >
 
 /** Task joined with counts derived from `sessions` and `subtasks`. Never stored. */
@@ -532,7 +543,12 @@ export type CalendarEvent = {
   title: string
   location: string | null
 } & (
-  | { allDay: false; startMs: number; endMs: number }
+  /**
+   * `timeZone`: the IANA zone the event was defined in (its TZID), or null for UTC/floating.
+   * Blocks are positioned by the instants on this computer's clock; the zone is only used to
+   * also label the event's original time when it differs from local.
+   */
+  | { allDay: false; startMs: number; endMs: number; timeZone: string | null }
   /** `endDate` is exclusive, as in RFC 5545: a one-day event on the 3rd ends on the 4th. */
   | { allDay: true; startDate: string; endDate: string }
 )
@@ -542,6 +558,23 @@ export type CalendarEvent = {
  * refresh — so the stores re-read instead of showing what was true before the sync.
  */
 export type DataChangedScope = 'tasks' | 'projects' | 'calendar'
+
+/**
+ * How far around today calendar occurrences are expanded and cached, in local days.
+ * Past covers a full month grid (up to six weeks shown) looking back; future covers about
+ * four months ahead. Shared so the calendar views can say "events are shown up to …" when
+ * navigated past it, instead of drawing an empty grid that looks like a free month.
+ */
+export const CALENDAR_CACHE_DAYS = { past: 42, future: 120 } as const
+
+/**
+ * Short, readable name for an IANA zone in a time label: 'Asia/Tehran' → 'Tehran',
+ * 'America/Argentina/Buenos_Aires' → 'Buenos Aires'. Falls back to the input.
+ */
+export function zoneLabel(timeZone: string): string {
+  const last = timeZone.split('/').pop() ?? timeZone
+  return last.replace(/_/g, ' ')
+}
 
 /** Where a synced task lives upstream, for "open in Todoist". */
 export function todoistTaskUrl(externalId: string): string {

@@ -15,6 +15,7 @@
  */
 
 import type { TaskWithStats } from '@shared/types'
+import { zoneLabel } from '@shared/types'
 
 /** 'YYYY-MM-DD' for the local calendar day containing `ms`. Mirrors `lib/format.ts`. */
 function localDateKey(ms: number): string {
@@ -49,19 +50,68 @@ export function nextLocalMidnight(nowMs: number): number {
 }
 
 /**
- * Ascending within a due-date group: timed tasks by `dueTime` first, then untimed; ties by
- * priority (1 = highest), then by the task's persisted sort order.
+ * The clock reading that determines a task's place in the user's day: `dueTimeLocal` when the
+ * due has a zone (this computer's clock, which is the real order events happen in for
+ * whoever is looking at the screen), falling back to `dueTime` for a zone-less/floating due.
+ */
+function orderingTime(task: Pick<TaskWithStats, 'dueTime' | 'dueTimeLocal'>): string | null {
+  return task.dueTimeLocal ?? task.dueTime
+}
+
+/**
+ * Ascending within a due-date group: timed tasks by local clock time first, then untimed;
+ * ties by priority (1 = highest), then by the task's persisted sort order.
  */
 function compareWithinGroup(a: TaskWithStats, b: TaskWithStats): number {
-  if (a.dueTime !== null && b.dueTime !== null) {
-    if (a.dueTime !== b.dueTime) return a.dueTime < b.dueTime ? -1 : 1
-  } else if (a.dueTime !== null) {
+  const at = orderingTime(a)
+  const bt = orderingTime(b)
+  if (at !== null && bt !== null) {
+    if (at !== bt) return at < bt ? -1 : 1
+  } else if (at !== null) {
     return -1
-  } else if (b.dueTime !== null) {
+  } else if (bt !== null) {
     return 1
   }
   if (a.priority !== b.priority) return a.priority - b.priority
   return a.sortOrder - b.sortOrder
+}
+
+export interface DueTimeParts {
+  dueTime: string | null
+  dueZone: string | null
+  dueTimeLocal: string | null
+}
+
+export interface DueTimeLabel {
+  /** Full label: "07:15 Tehran · 07:45 local" when the zones disagree, else plain "07:15".
+   *  `null` when the task has no due time at all. */
+  text: string | null
+  /** Same, but without the zone name — for a tight row: "07:15 · 07:45 local" or "07:15". Put
+   *  `zoneHint` in a tooltip alongside this when it is non-null. */
+  compact: string | null
+  /** The zone's short name (`zoneLabel`), present only when `compact` omits it — i.e. only
+   *  when the two clocks actually disagree. */
+  zoneHint: string | null
+}
+
+/**
+ * How a due time should read wherever it appears (task row, detail view, Today/Upcoming
+ * groups, timer picker): both clocks when they disagree, just the one time when they don't
+ * (including when there is a zone but it happens to match this computer's).
+ */
+export function dueTimeLabel(task: DueTimeParts): DueTimeLabel {
+  if (task.dueTime === null) return { text: null, compact: null, zoneHint: null }
+
+  const disagree =
+    task.dueZone !== null && task.dueTimeLocal !== null && task.dueTimeLocal !== task.dueTime
+  if (!disagree) return { text: task.dueTime, compact: task.dueTime, zoneHint: null }
+
+  const zone = zoneLabel(task.dueZone as string)
+  return {
+    text: `${task.dueTime} ${zone} · ${task.dueTimeLocal} local`,
+    compact: `${task.dueTime} · ${task.dueTimeLocal} local`,
+    zoneHint: zone
+  }
 }
 
 export interface TodaySelection {

@@ -27,6 +27,7 @@ import { useTasksStore } from '@renderer/stores/tasks'
 import { ClockIcon, ExternalLinkIcon, RepeatIcon, TodoistIcon, TrashIcon } from './icons'
 import { SubtaskList } from './SubtaskList'
 import { FIELD, InlineConfirm, SectionLabel } from './ui'
+import { dueTimeLabel } from './views'
 
 /** An externally-created row carries a placeholder id until its first push upstream. */
 function isUnsyncedPlaceholder(externalId: string | null): boolean {
@@ -107,6 +108,7 @@ export function TaskDetail(): React.JSX.Element | null {
   const project = projects.find((p) => p.id === task.projectId)
   const isFocused = focusTaskId === task.id
   const completed = task.completedAt !== null
+  const dueTime = dueTimeLabel(task)
   const synced = task.source === 'todoist'
   const deletedUpstream = task.remoteDeletedAt !== null
   const notSyncedYet = synced && (task.externalId === null || isUnsyncedPlaceholder(task.externalId))
@@ -388,6 +390,15 @@ export function TaskDetail(): React.JSX.Element | null {
               Clear
             </Button>
           </div>
+          {/* Provider-supplied, display only — there is no time-of-day input here because
+              nothing in this app can push one back upstream yet. Full form (zone spelled
+              out) since there is room, unlike the compact form used on the row. */}
+          {dueTime.text !== null ? (
+            <p className="mt-1.5 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+              <ClockIcon className="h-3 w-3 shrink-0" />
+              {dueTime.text}
+            </p>
+          ) : null}
         </Field>
 
         <Field label="Estimated pomodoros">

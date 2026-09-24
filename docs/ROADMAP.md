@@ -42,33 +42,39 @@ honoured but cannot be changed outside of a developer console.
   you don't want, and the arrangement persists across restarts. The window remembers its size
   and position too.
 
----
-
-## In progress
-
-### v0.3 — Todoist, Google Calendar, and a day timeline
+### v0.3 — Todoist, Google Calendar, and a calendar screen
 
 Pull real work in rather than retyping it, and see the day you actually have before deciding
 what to focus on next. This moved ahead of the Linux port because it's the pair of features most
 likely to change how the app gets used day to day.
 
-- **Todoist, two-way** — sync tasks and subtasks using your personal API token. Projects come
-  from Todoist and are read-only in Flowdo; rename or delete them there instead. Completing a
-  recurring task advances it, the same as it would in Todoist. A task deleted upstream is marked
-  rather than removed, and you choose whether to keep it locally or delete it. Sync runs every
-  few minutes and again when you bring the window back into focus; changes made offline are sent
-  once you're back. Disconnecting converts synced tasks to local ones and never touches the time
-  already logged against them.
+- **Todoist, two-way** — tasks and subtasks sync both ways using your personal API token; edits
+  reach Todoist within seconds. Projects come from Todoist and are read-only in Flowdo. Completing
+  a recurring task advances it, as in Todoist. A task deleted upstream is marked rather than
+  removed, and you choose whether to keep it. Disconnecting converts synced tasks to local ones
+  and never touches the time already logged against them.
+- **Today and Upcoming** — the task list opens on what is due today, overdue first and then by
+  time, with the next seven days one click away.
 - **Google Calendar, read-only** — via a calendar's "Secret address in iCal format", no OAuth.
-  Events are cached roughly two weeks back and two months ahead, and render on the day timeline
-  below.
-- **Day timeline** — a day view of the sessions you actually worked, alongside calendar events,
-  overlaps laid out in columns.
+  Events are cached roughly six weeks back and four months ahead.
+- **Calendar screen** — Day, Week and Month views of the sessions you actually worked alongside
+  your calendar events.
+- **Two time zones at once** — when a task or event was set in a different time zone than your
+  computer's, both times are shown, e.g. "07:15 Tehran · 07:45 local".
+- **Daily backup** — a copy of your data from each of the last 14 days.
 - **Credentials stored through the operating system's secure storage.** Where no secure backend
-  is available, Flowdo declines to store the secret and says why rather than falling back to
-  plain text. Tokens and calendar addresses never leave the main process, are never included in
-  an export, and no client secret is embedded in the source. JSON import is refused while
-  Todoist is connected, since imported data could conflict with what's actively syncing.
+  is available, Flowdo declines to store the secret rather than fall back to plain text. Tokens
+  and calendar addresses never leave the main process and are never included in an export.
+
+---
+
+## Next
+
+### v0.3.1 — calendar details
+
+- **Weekday names everywhere the calendar shows a date.**
+- **Choose the first day of the week** in Settings (Sunday through Saturday, Monday by default);
+  the Week and Month views follow it.
 
 ### v0.4 — Linux, and a real release pipeline
 

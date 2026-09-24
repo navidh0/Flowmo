@@ -1,42 +1,107 @@
 /**
- * Open tasks for the current selection, plus quick capture and the completed history.
+ * The current selection's tasks, plus quick capture and the completed history.
+ *
+ * The current selection is either a project (or "All tasks") or a smart view (Today /
+ * Upcoming) — see `useTasksStore`'s `smartView`. A smart view spans every project and is
+ * grouped by due date instead of showing one flat, reorderable list, so it gets its own
+ * render path below rather than reusing the project list's drag machinery, which has no
+ * meaning once rows are grouped by date rather than a single persisted order.
  *
  * The add field is always mounted and always visible: capturing a task is the thing this
  * screen is for, and a capture flow that starts with "click New" costs a mouse trip you
  * make thirty times a day. Enter adds and leaves the caret in place for the next one.
  *
- * Reordering is native HTML5 drag-and-drop — no dependency for what is two events and an
- * array splice — and commits through `reorderTasks`, which applies the new order
- * optimistically and rolls it back if main rejects it. Alt+↑/↓ does the same thing from the
- * keyboard, because a drag-only feature is a mouse-only feature.
+ * Reordering (project/"All tasks" view only) is native HTML5 drag-and-drop — no dependency
+ * for what is two events and an array splice — and commits through `reorderTasks`, which
+ * applies the new order optimistically and rolls it back if main rejects it. Alt+↑/↓ does
+ * the same thing from the keyboard, because a drag-only feature is a mouse-only feature.
  */
 
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import type { Project, TaskWithStats } from '@shared/types'
 import { Button } from '@renderer/components/timer/Button'
-import { toLocalDateKey } from '@renderer/lib/format'
+import { formatDueDate } from '@renderer/lib/format'
 import { useTasksStore } from '@renderer/stores/tasks'
 import { ChevronIcon, EmptyListIcon, PlusIcon } from './icons'
 import { TaskRow, type RowDrag } from './TaskRow'
 import { FIELD, SectionLabel } from './ui'
+import { countUpcoming, selectToday, selectUpcoming } from './views'
 
 /** Where a new task lands when the "All tasks" view is open and no project is implied. */
 function fallbackProject(projects: Project[]): Project | undefined {
   return projects.find((p) => p.name === 'Inbox') ?? projects[0]
 }
 
+interface DueGroupProps {
+  label: string
+  tone?: 'muted' | 'danger'
+  tasks: TaskWithStats[]
+  todayKey: string
+  projects: Project[]
+  selectedTaskId: number | null
+  focusTaskId: number | null
+  onSelect: (id: number) => void
+  onComplete: (id: number) => void
+}
+
+/** One due-date group inside a smart view: a label, then its rows in the shared ordering
+ *  (`views.ts`'s `compareWithinGroup` via `selectToday`/`selectUpcoming`) — timed first by
+ *  time, then untimed by priority. Not draggable: there is no single persisted order across
+ *  a view that spans every project and regroups itself by due date. */
+function DueGroup({
+  label,
+  tone = 'muted',
+  tasks,
+  todayKey,
+  projects,
+  selectedTaskId,
+  focusTaskId,
+  onSelect,
+  onComplete
+}: DueGroupProps): React.JSX.Element {
+  return (
+    <div className="mb-3">
+      <div
+        className={`mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.09em] ${
+          tone === 'danger' ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-muted)]'
+        }`}
+      >
+        {label} <span className="tabular">· {tasks.length}</span>
+      </div>
+      <ul className="space-y-0.5">
+        {tasks.map((task) => (
+          <TaskRow
+            key={task.id}
+            task={task}
+            todayKey={todayKey}
+            selected={selectedTaskId === task.id}
+            focused={focusTaskId === task.id}
+            project={projects.find((p) => p.id === task.projectId)}
+            onSelect={() => onSelect(task.id)}
+            onToggleComplete={() => onComplete(task.id)}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function TaskList(): React.JSX.Element {
   const projects = useTasksStore((s) => s.projects)
   const selectedProjectId = useTasksStore((s) => s.selectedProjectId)
+  const smartView = useTasksStore((s) => s.smartView)
   const tasks = useTasksStore((s) => s.tasks)
+  const allOpenTasks = useTasksStore((s) => s.allOpenTasks)
   const completedTasks = useTasksStore((s) => s.completedTasks)
   const selectedTaskId = useTasksStore((s) => s.selectedTaskId)
   const focusTaskId = useTasksStore((s) => s.focusTaskId)
   const showCompleted = useTasksStore((s) => s.showCompleted)
   const loading = useTasksStore((s) => s.loading)
   const ready = useTasksStore((s) => s.ready)
+  const todayKey = useTasksStore((s) => s.todayKey)
 
   const selectTask = useTasksStore((s) => s.selectTask)
+  const selectSmartView = useTasksStore((s) => s.selectSmartView)
   const createTask = useTasksStore((s) => s.createTask)
   const setTaskCompleted = useTasksStore((s) => s.setTaskCompleted)
   const reorderTasks = useTasksStore((s) => s.reorderTasks)
@@ -47,17 +112,24 @@ export function TaskList(): React.JSX.Element {
   /** Insertion point in the current display order, 0..tasks.length. */
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const smartListRef = useRef<HTMLDivElement>(null)
 
   const activeProject = projects.find((p) => p.id === selectedProjectId)
   const addTarget = activeProject ?? fallbackProject(projects)
-  const crossProject = selectedProjectId === null
-  const todayKey = toLocalDateKey(Date.now())
+  // A smart view spans every project, same as the cross-project "All tasks" view — both show
+  // the row's own project dot, since it is otherwise unknowable from the list alone.
+  const crossProject = selectedProjectId === null || smartView !== null
 
   async function submitDraft(): Promise<void> {
     const title = draft.trim()
     if (!title || !addTarget) return
     setDraft('')
-    await createTask({ projectId: addTarget.id, title })
+    // Adding from Today should not silently vanish from the view it was typed into.
+    await createTask({
+      projectId: addTarget.id,
+      title,
+      ...(smartView === 'today' ? { dueDate: todayKey } : {})
+    })
   }
 
   /**
@@ -86,10 +158,11 @@ export function TaskList(): React.JSX.Element {
   }
 
   /** ↑/↓ walks the rows so the list is navigable without a pointer. */
-  function onListKeyDown(event: KeyboardEvent<HTMLUListElement>): void {
+  function onListKeyDown(event: KeyboardEvent<HTMLElement>): void {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
     if (event.altKey) return
-    const rows = listRef.current?.querySelectorAll<HTMLElement>('[data-task-row]')
+    const container = smartView !== null ? smartListRef.current : listRef.current
+    const rows = container?.querySelectorAll<HTMLElement>('[data-task-row]')
     if (!rows || rows.length === 0) return
     const current = Array.from(rows).indexOf(document.activeElement as HTMLElement)
     if (current < 0) return
@@ -130,8 +203,156 @@ export function TaskList(): React.JSX.Element {
     }
   }
 
-  const openCount = tasks.length
   const initialLoad = loading && !ready
+
+  // ── Smart views ──────────────────────────────────────────────────────────────
+  if (smartView !== null) {
+    const today = smartView === 'today' ? selectToday(allOpenTasks, todayKey) : null
+    const upcomingDays = smartView === 'upcoming' ? selectUpcoming(allOpenTasks, todayKey) : []
+    const todayOpenCount = today ? today.overdue.length + today.today.length : 0
+    const upcomingOpenCount = upcomingDays.reduce((n, day) => n + day.tasks.length, 0)
+    const openCount = smartView === 'today' ? todayOpenCount : upcomingOpenCount
+    const isEmpty = !initialLoad && openCount === 0
+
+    return (
+      <section className="flex h-full min-h-0 flex-col">
+        <header className="flex items-baseline gap-2.5 px-4 pb-2.5 pt-3.5">
+          <h2 className="min-w-0 truncate text-[15px] font-semibold tracking-tight">
+            {smartView === 'today' ? 'Today' : 'Upcoming'}
+          </h2>
+          <span className="tabular shrink-0 text-[12px] text-[var(--color-text-muted)]">
+            {openCount} open
+          </span>
+        </header>
+
+        <div className="px-4 pb-2.5">
+          <div className="relative">
+            <PlusIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
+            <input
+              className={`${FIELD} pl-8`}
+              placeholder={
+                addTarget
+                  ? `Add a task${smartView === 'today' ? ', due today' : ''} — Enter to save`
+                  : 'Create a project first'
+              }
+              aria-label="Add a task"
+              disabled={!addTarget}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void submitDraft()
+                if (e.key === 'Escape') setDraft('')
+              }}
+            />
+          </div>
+          {addTarget ? (
+            <p className="mt-1 px-1 text-[11px] text-[var(--color-text-muted)]">
+              Goes to {addTarget.name}
+              {smartView === 'today' ? ', due today' : ''}.
+            </p>
+          ) : null}
+        </div>
+
+        <div
+          ref={smartListRef}
+          className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4"
+          onKeyDown={onListKeyDown}
+        >
+          {initialLoad ? (
+            <ul className="space-y-1.5 px-1.5" aria-hidden="true">
+              {[0, 1, 2].map((n) => (
+                <li
+                  key={n}
+                  className="h-11 animate-pulse rounded-lg bg-[var(--color-surface-raised)]/60"
+                />
+              ))}
+            </ul>
+          ) : null}
+
+          {isEmpty && smartView === 'today' ? (
+            <div className="mt-8 flex flex-col items-center px-6 text-center">
+              <EmptyListIcon className="h-9 w-9 text-[var(--color-text-muted)]/50" />
+              <p className="mt-3 text-[13px] text-[var(--color-text)]">Nothing due today.</p>
+              {(() => {
+                const upcomingCount = countUpcoming(allOpenTasks, todayKey)
+                return upcomingCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => void selectSmartView('upcoming')}
+                    className="mt-1 text-[12px] text-[var(--color-focus)] outline-none hover:underline focus-visible:underline"
+                  >
+                    {upcomingCount} upcoming
+                  </button>
+                ) : (
+                  <p className="mt-1 max-w-64 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                    Nothing scheduled in the next 7 days either.
+                  </p>
+                )
+              })()}
+            </div>
+          ) : null}
+
+          {isEmpty && smartView === 'upcoming' ? (
+            <div className="mt-8 flex flex-col items-center px-6 text-center">
+              <EmptyListIcon className="h-9 w-9 text-[var(--color-text-muted)]/50" />
+              <p className="mt-3 text-[13px] text-[var(--color-text)]">
+                Nothing due in the next 7 days.
+              </p>
+            </div>
+          ) : null}
+
+          {!initialLoad && today && (today.overdue.length > 0 || today.today.length > 0) ? (
+            <>
+              {today.overdue.length > 0 ? (
+                <DueGroup
+                  label="Overdue"
+                  tone="danger"
+                  tasks={today.overdue}
+                  todayKey={todayKey}
+                  projects={projects}
+                  selectedTaskId={selectedTaskId}
+                  focusTaskId={focusTaskId}
+                  onSelect={(id) => void selectTask(id)}
+                  onComplete={(id) => void setTaskCompleted(id, true)}
+                />
+              ) : null}
+              {today.today.length > 0 ? (
+                <DueGroup
+                  label="Today"
+                  tasks={today.today}
+                  todayKey={todayKey}
+                  projects={projects}
+                  selectedTaskId={selectedTaskId}
+                  focusTaskId={focusTaskId}
+                  onSelect={(id) => void selectTask(id)}
+                  onComplete={(id) => void setTaskCompleted(id, true)}
+                />
+              ) : null}
+            </>
+          ) : null}
+
+          {!initialLoad
+            ? upcomingDays.map((day) => (
+                <DueGroup
+                  key={day.dateKey}
+                  label={formatDueDate(day.dateKey) ?? day.dateKey}
+                  tasks={day.tasks}
+                  todayKey={todayKey}
+                  projects={projects}
+                  selectedTaskId={selectedTaskId}
+                  focusTaskId={focusTaskId}
+                  onSelect={(id) => void selectTask(id)}
+                  onComplete={(id) => void setTaskCompleted(id, true)}
+                />
+              ))
+            : null}
+        </div>
+      </section>
+    )
+  }
+
+  // ── Project / "All tasks" view ───────────────────────────────────────────────
+  const openCount = tasks.length
 
   return (
     <section className="flex h-full min-h-0 flex-col">

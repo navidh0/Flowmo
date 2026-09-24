@@ -248,6 +248,45 @@ export function ExternalLinkIcon({ className = 'h-3.5 w-3.5' }: IconProps): Reac
   )
 }
 
+/** A calendar page with a forward arrow — the "Upcoming" smart view, distinct from the plain
+ *  calendar glyph used for due dates. */
+export function UpcomingIcon({ className = 'h-4 w-4' }: IconProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="1.6" y="3.4" width="9.6" height="9.6" rx="1.6" />
+      <path d="M1.6 6.2h9.6M4.2 2.2v2.2" />
+      <path d="M11.6 9.4h2.8M13 8v2.8" />
+    </svg>
+  )
+}
+
+/** A sun-like burst — "Today", distinct from the plain calendar glyph used for due dates. */
+export function TodayIcon({ className = 'h-4 w-4' }: IconProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="3" />
+      <path d="M8 1.6v1.6M8 12.8v1.6M2.5 8H1M15 8h-1.5M3.5 3.5l1.1 1.1M11.4 11.4l1.1 1.1M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1" />
+    </svg>
+  )
+}
+
 /** An empty list, for the "no tasks yet" state. */
 export function EmptyListIcon({ className = 'h-8 w-8' }: IconProps): React.JSX.Element {
   return (

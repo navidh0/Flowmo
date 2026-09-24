@@ -6,6 +6,7 @@
  */
 
 import type { Priority } from '@shared/types'
+import { wallClockInZone } from '../../db'
 import type { RemoteDue } from './wire-types'
 
 /** Todoist 4 = urgent, Flowdo 1 = highest. The formula is its own inverse. */
@@ -22,25 +23,80 @@ export function toLocalPriority(remote: number): Priority {
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
 const HAS_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/
 const HAS_TIME = /^\d{4}-\d{2}-\d{2}T/
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 
 /**
- * The local calendar day a Todoist `due.date` string falls on, or `null` if the string
- * cannot be parsed as a date at all.
+ * Todoist's fixed 20-colour palette (`id`, `name`, hex), verified against the "Colors"
+ * section of https://developer.todoist.com/api/v1/ (2026-09-24, curled directly — this
+ * table lives in a guide fragment the rendered SPA loads separately from the main
+ * reference, which is why the earlier due-dates verification pass didn't surface it).
+ * Projects (and labels/filters) are returned with the *name* column, e.g. `"charcoal"`,
+ * never the hex Flowdo's `Project.color` contract requires.
+ */
+const TODOIST_COLOR_HEX: Readonly<Record<string, string>> = {
+  berry_red: '#B8255F',
+  red: '#DC4C3E',
+  orange: '#C77100',
+  yellow: '#B29104',
+  olive_green: '#949C31',
+  lime_green: '#65A33A',
+  green: '#369307',
+  mint_green: '#42A393',
+  teal: '#148FAD',
+  sky_blue: '#319DC0',
+  light_blue: '#6988A4',
+  blue: '#4180FF',
+  grape: '#692EC2',
+  violet: '#CA3FEE',
+  lavender: '#A4698C',
+  magenta: '#E05095',
+  salmon: '#C9766F',
+  charcoal: '#808080',
+  grey: '#999999',
+  taupe: '#8F7A69'
+}
+
+/** Falls back to charcoal's hex for anything unrecognised — never propagates a bare
+ *  colour name (or garbage) into `Project.color`, which the contract requires to be
+ *  `#rrggbb`; the sidebar dot and stats breakdown render nothing for anything else. */
+const UNKNOWN_COLOR_HEX = '#808080'
+
+export function toProjectColorHex(remoteColor: string | null | undefined): string {
+  if (!remoteColor) return UNKNOWN_COLOR_HEX
+  if (HEX_COLOR.test(remoteColor)) return remoteColor
+  return TODOIST_COLOR_HEX[remoteColor] ?? UNKNOWN_COLOR_HEX
+}
+
+/**
+ * The calendar day a Todoist `due.date` string falls on, or `null` if the string cannot
+ * be parsed as a date at all.
  *
  * - Date-only ('YYYY-MM-DD') is the day, verbatim.
  * - A floating datetime (no trailing 'Z'/offset) has no attached zone — its date part
  *   *is* the day, in every timezone, by definition.
- * - A zoned datetime is a real instant; the day is whatever the host's local clock reads
- *   at that instant, computed in JS (never via SQL date()/strftime(), which assume UTC).
+ * - A zoned datetime is a real instant. Todoist dates it in the due's OWN `timezone`
+ *   (the zone the user actually set it in), which is not necessarily the host machine's
+ *   zone — a task due at 23:45 in Asia/Tehran is 00:15 the next day in Asia/Dubai, a real
+ *   case that filed a task under the wrong day when this only looked at the host clock.
+ *   `timezone` is read via `wallClockInZone` (never via SQL date()/strftime(), which
+ *   assume UTC); only when it is absent or not a valid IANA name does this fall back to
+ *   the HOST's local clock, as before.
  *
  * A malformed offset string (one `Date` can't parse) must never produce the literal text
  * "NaN-NaN-NaN" into `tasks.due_date` — that degrades to `null` (no due date) instead.
  */
-export function calendarDayFromDue(dateStr: string): string | null {
+export function calendarDayFromDue(dateStr: string, timezone?: string | null): string | null {
   if (DATE_ONLY.test(dateStr)) return dateStr
   if (!HAS_OFFSET.test(dateStr)) return dateStr.slice(0, 10)
   const d = new Date(dateStr)
   if (Number.isNaN(d.getTime())) return null
+
+  if (timezone) {
+    const wall = wallClockInZone(d.getTime(), timezone)
+    if (wall) return wall.dateKey
+    // Invalid/unrecognised IANA name: fall through to the host-local reading below.
+  }
+
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
@@ -49,12 +105,15 @@ export function calendarDayFromDue(dateStr: string): string | null {
 
 export function dueDateFromRemote(due: RemoteDue | null): string | null {
   if (!due) return null
-  return calendarDayFromDue(due.date)
+  return calendarDayFromDue(due.date, due.timezone)
 }
 
-/** The local wall-clock time of day a `due.date` string carries, or null for a date-only
- *  due (midnight has no meaning to preserve). For a zoned datetime, converts the UTC
- *  instant to wall time in `timezone` via `Intl` — never a manual UTC-offset guess. */
+/** The wall-clock time of day a `due.date` string carries, or null for a date-only due
+ *  (midnight has no meaning to preserve). For a zoned datetime, converts the UTC instant
+ *  to wall time in the due's OWN `timezone` — the zone the user actually set it in, which
+ *  can differ from the host machine's zone (see `calendarDayFromDue`). Falls back to the
+ *  host's local clock only when `timezone` is absent or not a valid IANA name — never to
+ *  UTC, which would silently be wrong for both. */
 function timeOfDay(dateStr: string, timezone: string | null | undefined): { h: number; m: number; s: number } | null {
   if (!HAS_TIME.test(dateStr)) return null
   if (!HAS_OFFSET.test(dateStr)) {
@@ -64,15 +123,24 @@ function timeOfDay(dateStr: string, timezone: string | null | undefined): { h: n
   }
   const instant = new Date(dateStr)
   if (Number.isNaN(instant.getTime())) return null
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone ?? 'UTC',
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }).formatToParts(instant)
-  const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? '0')
-  return { h: get('hour') % 24, m: get('minute'), s: get('second') }
+
+  if (timezone) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }).formatToParts(instant)
+      const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? '0')
+      return { h: get('hour') % 24, m: get('minute'), s: get('second') }
+    } catch {
+      // Invalid/unrecognised IANA name: fall through to the host-local reading below.
+    }
+  }
+
+  return { h: instant.getHours(), m: instant.getMinutes(), s: instant.getSeconds() }
 }
 
 /**
@@ -135,7 +203,10 @@ export function buildDueForDateChange(newDueDate: string | null, previous: Remot
   if (!previous) return { date: newDueDate }
 
   const time = timeOfDay(previous.date, previous.timezone)
-  const zoned = time !== null && HAS_OFFSET.test(previous.date)
+  // Only treat this as a real zoned conversion when there is an actual timezone string to
+  // convert with — a zoned datetime that's missing one (malformed data) degrades to being
+  // handled like a floating time below rather than passing `null` into `zonedWallTimeToUtcIso`.
+  const zoned = time !== null && HAS_OFFSET.test(previous.date) && typeof previous.timezone === 'string'
 
   let date: string
   if (time === null) {

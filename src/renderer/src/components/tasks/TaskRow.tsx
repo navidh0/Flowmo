@@ -99,6 +99,9 @@ export function TaskRow({
   drag
 }: TaskRowProps): React.JSX.Element {
   const due = formatDueDate(task.dueDate)
+  // A provider-supplied time of day ('HH:MM', display/ordering only — never combined with
+  // dueDate into an instant), shown next to the date chip when the due has one.
+  const dueText = due !== null && task.dueTime !== null ? `${due} · ${task.dueTime}` : due
   // Both sides are 'YYYY-MM-DD' local keys, so a lexical compare is a calendar compare —
   // and never round-trips the date through an instant, which would shift the day.
   const overdue = !completed && task.dueDate !== null && task.dueDate < todayKey
@@ -231,7 +234,7 @@ export function TaskRow({
           </div>
         ) : null}
 
-        {due !== null || showPomodoros || task.focusMs > 0 || task.subtaskTotal > 0 || project ? (
+        {dueText !== null || showPomodoros || task.focusMs > 0 || task.subtaskTotal > 0 || project ? (
           <div className="mt-[3px] flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-4">
             {project ? (
               <span
@@ -246,13 +249,17 @@ export function TaskRow({
               </span>
             ) : null}
 
-            {due !== null ? (
+            {dueText !== null ? (
               <Meta
                 icon={
                   overdue ? <WarningIcon className="h-3 w-3" /> : <CalendarIcon className="h-3 w-3" />
                 }
-                text={due}
-                title={`Due ${task.dueDate}`}
+                text={dueText}
+                title={
+                  task.dueTime !== null
+                    ? `Due ${task.dueDate} at ${task.dueTime}`
+                    : `Due ${task.dueDate}`
+                }
                 tone={overdue ? 'danger' : dueToday ? 'plain' : 'muted'}
               />
             ) : null}

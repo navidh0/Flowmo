@@ -201,6 +201,76 @@ describe('incremental sync', () => {
     const changedTask = tasksRepo.list().find((t) => t.title === 'Changed title')
     expect(changedTask).toBeTruthy()
   })
+
+  it('heals a project colour stored as a Todoist NAME (pre-fix row) with NO upstream change', async () => {
+    const project = server.addProject({ name: 'Work', color: 'charcoal' })
+    await integration.connect('valid-token')
+
+    // Simulate a row written before the name -> hex mapping existed. Deliberately no
+    // `server.addProject`/`mutateItem` call after this: an incremental pull would never
+    // report this project again on its own, since nothing changed upstream — the healing
+    // pass has to run locally, independent of what the server sends back.
+    getDb().prepare("UPDATE projects SET color = 'charcoal' WHERE source = 'todoist' AND external_id = ?").run(project.id)
+
+    changed.length = 0 // connect() above already emitted 'projects' once; isolate this cycle's emission
+    const status = await integration.syncNow()
+    expect(status.health.state).toBe('ok')
+    expect(changed).toContain('projects')
+
+    const healed = projectsRepo.list().find((p) => p.name === 'Work')!
+    expect(healed.color).toBe('#808080')
+  })
+})
+
+describe('healing task due dates', () => {
+  it('recomputes due_date from remote_due locally when nothing changed upstream', async () => {
+    const project = server.addProject({ name: 'Work' })
+    server.addItem({
+      content: 'Tehran task',
+      projectId: project.id,
+      due: { date: '2026-06-15T20:15:00Z', timezone: 'Asia/Tehran', string: 'tomorrow at 11:45pm' }
+    })
+    await integration.connect('valid-token')
+
+    const task = tasksRepo.list().find((t) => t.title === 'Tehran task')!
+    expect(task.dueDate).toBe('2026-06-15') // correct from the start, with the fix in place
+
+    // Simulate a row `due_date` computed by the old host-local-only logic (the account is
+    // Asia/Tehran, the host in this scenario would have been a zone that reads this UTC
+    // instant a day later — see tests/todoist-mapper.test.ts for the exact arithmetic).
+    getDb().prepare('UPDATE tasks SET due_date = ? WHERE id = ?').run('2026-06-16', task.id)
+
+    changed.length = 0 // isolate this cycle's onDataChanged emission from connect()'s
+    const status = await integration.syncNow()
+    expect(status.health.state).toBe('ok')
+    expect(changed).toContain('tasks')
+
+    const healed = tasksRepo.list().find((t) => t.id === task.id)!
+    expect(healed.dueDate).toBe('2026-06-15')
+  })
+
+  it('does not overwrite due_date while an outbox command is still pending for it', async () => {
+    const project = server.addProject({ name: 'Work' })
+    server.addItem({
+      content: 'Tehran task',
+      projectId: project.id,
+      due: { date: '2026-06-15T20:15:00Z', timezone: 'Asia/Tehran' }
+    })
+    await integration.connect('valid-token')
+
+    const task = tasksRepo.list().find((t) => t.title === 'Tehran task')!
+    // A local edit to dueDate queued but not yet pushed.
+    tasksRepo.update(task.id, { dueDate: '2026-08-01' })
+    // Corrupt the stored value the way a legacy row might read, to prove the healing pass
+    // would otherwise have touched it.
+    getDb().prepare('UPDATE tasks SET due_date = ? WHERE id = ?').run('2026-06-16', task.id)
+
+    server.commandStatusOverride = () => ({ error: 'temporarily unavailable', http_code: 500 })
+    await integration.syncNow()
+
+    const after = tasksRepo.list().find((t) => t.id === task.id)!
+    expect(after.dueDate).toBe('2026-06-16') // untouched — protected by the pending command
+  })
 })
 
 describe('upstream delete', () => {

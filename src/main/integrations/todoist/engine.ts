@@ -17,6 +17,8 @@ import { TodoistClient, TodoistHttpError, TodoistNetworkError } from './client'
 import {
   applyCompletedBackfill,
   convertAllToLocal,
+  healProjectColors,
+  healTaskDueDates,
   pullItems,
   pullProjects
 } from './store'
@@ -234,8 +236,12 @@ export function createTodoistIntegration(deps: TodoistDeps): TodoistIntegration 
     let syncToken = stored?.syncToken ?? '*'
     const isFirstOrPostOutage = stored === null || stored.lastError !== null
     const c = client(token)
-    let tasksChanged = false
-    let projectsChanged = false
+    // Local-only healing passes, not tied to the network round trip below: an incremental
+    // pull only reports what changed upstream, so a row the user never edits again would
+    // otherwise never come back through pullProjects/pullItems and never pick up a fix to
+    // toProjectColorHex or calendarDayFromDue. Cheap and idempotent — safe every cycle.
+    let tasksChanged = healTaskDueDates(db)
+    let projectsChanged = healProjectColors(db)
 
     const outboxRows = readOutboxBatch(db, 100)
     if (outboxRows.length > 0) {

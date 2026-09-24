@@ -10,7 +10,7 @@
 
 import type { DatabaseSync } from 'node:sqlite'
 import { bool, num, numOrNull, rowId, str, strOrNull, toInt, type Row } from '../../db'
-import { calendarDayFromDue, dueDateFromRemote, toLocalPriority } from './mapper'
+import { calendarDayFromDue, dueDateFromRemote, toLocalPriority, toProjectColorHex } from './mapper'
 import type { RemoteCompletedItem, RemoteDue, RemoteItem, RemoteProject } from './wire-types'
 
 function parseIsoMs(iso: string | null | undefined, fallback: number): number {
@@ -70,7 +70,81 @@ function buildProtectedFields(db: DatabaseSync): Map<string, FieldSet> {
   return map
 }
 
+/**
+ * Recompute `due_date` from the stored `remote_due` for every todoist-sourced task, in
+ * place — no network involved.
+ *
+ * Necessary for the same reason as `healProjectColors`: an *incremental* pull only
+ * reports rows that changed upstream, and existing rows whose `due_date` was computed
+ * with the host-local-only version of `calendarDayFromDue` (before it honoured the due's
+ * own `timezone`) would otherwise never come back through `pullItems` and never heal.
+ * Skips a row with a pending outbox command touching `dueDate` — local intent still wins
+ * until that command is pushed, same as during a normal pull.
+ */
+export function healTaskDueDates(db: DatabaseSync): boolean {
+  const rows = db
+    .prepare("SELECT id, due_date, remote_due, external_id FROM tasks WHERE source = 'todoist'")
+    .all() as Row[]
+  if (rows.length === 0) return false
+
+  const protectedFields = buildProtectedFields(db)
+  const updateStmt = db.prepare('UPDATE tasks SET due_date = ? WHERE id = ?')
+  let changed = false
+
+  for (const row of rows) {
+    const externalId = strOrNull(row, 'external_id')
+    if (externalId && protectedFields.get(externalId)?.has('dueDate')) continue
+
+    let due: RemoteDue | null = null
+    const raw = strOrNull(row, 'remote_due')
+    if (raw !== null) {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        due = parsed && typeof parsed === 'object' ? (parsed as RemoteDue) : null
+      } catch {
+        due = null
+      }
+    }
+
+    const recomputed = dueDateFromRemote(due)
+    const current = strOrNull(row, 'due_date')
+    if (recomputed !== current) {
+      updateStmt.run(recomputed, num(row, 'id'))
+      changed = true
+    }
+  }
+
+  return changed
+}
+
 // ── projects ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Rewrite any todoist-sourced project still holding a stored colour NAME (rows written
+ * before `toProjectColorHex` existed) to hex, in place — no network involved.
+ *
+ * Necessary because an *incremental* pull only reports projects that changed upstream:
+ * an existing project the user never touches again would otherwise never come back
+ * through `pullProjects` and never heal. This runs at the start of every cycle instead,
+ * which is cheap (a handful of rows, at most) and idempotent (`toProjectColorHex` on an
+ * already-valid hex value is a no-op, so nothing is rewritten a second time).
+ */
+export function healProjectColors(db: DatabaseSync): boolean {
+  const rows = db.prepare("SELECT id, color FROM projects WHERE source = 'todoist'").all() as Row[]
+  if (rows.length === 0) return false
+
+  const updateStmt = db.prepare('UPDATE projects SET color = ? WHERE id = ?')
+  let changed = false
+  for (const row of rows) {
+    const current = str(row, 'color')
+    const healed = toProjectColorHex(current)
+    if (healed !== current) {
+      updateStmt.run(healed, num(row, 'id'))
+      changed = true
+    }
+  }
+  return changed
+}
 
 export interface ProjectPullResult {
   changed: boolean
@@ -98,7 +172,10 @@ export function pullProjects(db: DatabaseSync, projects: RemoteProject[], now: n
 
   for (const project of projects) {
     const archived = toInt(project.is_archived === true || project.is_deleted === true)
-    const color = project.color ?? '#6366f1'
+    // Todoist sends a colour NAME ('charcoal', 'berry_red', ...), never hex — map it here
+    // so `sameColor` below compares like with like and a name that slipped into an older
+    // row (before this mapping existed) heals to hex on its next pull.
+    const color = toProjectColorHex(project.color)
     const existing = findStmt.get(project.id) as Row | undefined
 
     if (!existing) {

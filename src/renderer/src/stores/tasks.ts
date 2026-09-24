@@ -25,9 +25,18 @@ import type {
   TaskUpdate,
   TaskWithStats
 } from '@shared/types'
+import { toLocalDateKey } from '@renderer/lib/format'
+import { nextLocalMidnight } from '@renderer/components/tasks/views'
 
 /** The completed list is a recent-history view, not an archive. */
 const COMPLETED_LIMIT = 100
+
+/**
+ * The sidebar entries above "All tasks" and the projects. Orthogonal to `selectedProjectId`:
+ * a smart view spans every project, so it does not reuse the project-selection field, and
+ * selecting a project clears it (and vice versa).
+ */
+export type SmartView = 'today' | 'upcoming'
 
 const BRIDGE_MISSING = 'The app bridge is not available yet.'
 
@@ -72,10 +81,20 @@ function tally(tasks: TaskWithStats[]): Record<number, number> {
 
 export interface TasksState {
   projects: Project[]
-  /** null = the "All tasks" pseudo-project. */
+  /** null = the "All tasks" pseudo-project. Ignored while `smartView` is set. */
   selectedProjectId: number | null
+  /** Non-null while a smart view (Today/Upcoming) is showing instead of a project. */
+  smartView: SmartView | null
   /** Open tasks for the current selection, in persisted sort order. */
   tasks: TaskWithStats[]
+  /**
+   * Every open task, across every project, regardless of the current selection — what the
+   * smart views group/filter from and what the sidebar's Today/Upcoming badges count from.
+   * Kept alongside `tasks` (which is filtered to the current project) rather than derived
+   * from it, since a smart view needs projects the current selection has already filtered
+   * out.
+   */
+  allOpenTasks: TaskWithStats[]
   completedTasks: TaskWithStats[]
   /** Open task count per project id, for the sidebar badges. */
   openCounts: Record<number, number>
@@ -88,6 +107,12 @@ export interface TasksState {
   /** The timer's focus target, mirrored from main. Separate from `selectedTaskId`. */
   focusTaskId: number | null
   showCompleted: boolean
+  /**
+   * Local calendar day, 'YYYY-MM-DD'. Held in state (rather than computed inline on every
+   * render) so the Today/Upcoming views can be made to roll over at local midnight without
+   * every consumer independently polling the clock — see the rollover timer in `init()`.
+   */
+  todayKey: string
   /** True for the initial load and project switches, not for individual mutations. */
   loading: boolean
   error: string | null
@@ -100,6 +125,8 @@ export interface TasksActions {
   clearError: () => void
 
   selectProject: (projectId: number | null) => Promise<void>
+  /** Switches to a smart view; clears `selectedProjectId`'s effect (see `smartView` above). */
+  selectSmartView: (view: SmartView) => Promise<void>
   /** Opens the detail drawer AND points the timer at the task. */
   selectTask: (taskId: number | null) => Promise<void>
   toggleShowCompleted: () => Promise<void>
@@ -139,7 +166,11 @@ export type TasksStore = TasksState & TasksActions
 const INITIAL: TasksState = {
   projects: [],
   selectedProjectId: null,
+  // Today is the default view on launch — with dozens of synced tasks, a flat "All tasks"
+  // list is not what you open the app to see.
+  smartView: 'today',
   tasks: [],
+  allOpenTasks: [],
   completedTasks: [],
   openCounts: {},
   openTotal: 0,
@@ -147,6 +178,7 @@ const INITIAL: TasksState = {
   subtasks: [],
   focusTaskId: null,
   showCompleted: false,
+  todayKey: toLocalDateKey(Date.now()),
   loading: true,
   error: null,
   ready: false
@@ -249,6 +281,30 @@ export const useTasksStore = create<TasksStore>((set, get) => {
         })
       )
 
+      // Today/Upcoming roll over at local midnight, not on a fixed interval — a setInterval
+      // would either miss the boundary or wake up 1440 times a day for nothing. Re-derived
+      // from `Date` fields on every tick rather than adding 24h, so a DST day (23 or 25 real
+      // hours) still rolls over at wall-clock midnight instead of an hour early or late.
+      function scheduleMidnightRollover(): void {
+        const delay = Math.max(1000, nextLocalMidnight(Date.now()) - Date.now() + 250)
+        const timer = setTimeout(() => {
+          if (mine !== generation) return
+          set({ todayKey: toLocalDateKey(Date.now()) })
+          scheduleMidnightRollover()
+        }, delay)
+        unsubscribers.push(() => clearTimeout(timer))
+      }
+      scheduleMidnightRollover()
+
+      // A laptop asleep across midnight will not fire the timeout above until it wakes, which
+      // may be well after the fact — catch up as soon as the window is looked at again.
+      function onFocus(): void {
+        const key = toLocalDateKey(Date.now())
+        if (get().todayKey !== key) set({ todayKey: key })
+      }
+      window.addEventListener('focus', onFocus)
+      unsubscribers.push(() => window.removeEventListener('focus', onFocus))
+
       await read(async (b) => {
         const [projects, allOpen, timer] = await Promise.all([
           b.projects.list(),
@@ -260,6 +316,7 @@ export const useTasksStore = create<TasksStore>((set, get) => {
         set({
           projects,
           tasks: selected == null ? allOpen : allOpen.filter((t) => t.projectId === selected),
+          allOpenTasks: allOpen,
           openCounts: tally(allOpen),
           openTotal: allOpen.length,
           focusTaskId: timer.taskId
@@ -284,10 +341,22 @@ export const useTasksStore = create<TasksStore>((set, get) => {
     async selectProject(projectId) {
       // Detail selection is per-project; the timer target deliberately is not — you can
       // browse another project without losing what you are counting time against.
-      set({ selectedProjectId: projectId, selectedTaskId: null, subtasks: [], loading: true })
+      set({
+        selectedProjectId: projectId,
+        smartView: null,
+        selectedTaskId: null,
+        subtasks: [],
+        loading: true
+      })
       await get().refreshTasks()
       await get().refreshCompleted()
       set({ loading: false })
+    },
+
+    async selectSmartView(view) {
+      // Unlike a project switch, a smart view reads out of `allOpenTasks`, which `init()` and
+      // every mutation already keep current — no extra fetch needed to show it immediately.
+      set({ smartView: view, selectedTaskId: null, subtasks: [] })
     },
 
     async selectTask(taskId) {
@@ -322,6 +391,7 @@ export const useTasksStore = create<TasksStore>((set, get) => {
         const selected = get().selectedProjectId
         set({
           tasks: selected == null ? allOpen : allOpen.filter((t) => t.projectId === selected),
+          allOpenTasks: allOpen,
           openCounts: tally(allOpen),
           openTotal: allOpen.length
         })

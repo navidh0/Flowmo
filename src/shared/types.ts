@@ -272,6 +272,13 @@ export interface Task extends SyncOrigin {
   /** Local calendar day as 'YYYY-MM-DD'. Deliberately not an instant — a due date
    *  has no time zone, and storing it as epoch ms shifts the day across DST. */
   dueDate: string | null
+  /**
+   * Local wall-clock time of day, 'HH:MM', when the due date has one (a Todoist task "due
+   * 21 Nov 19:00"); null for date-only and local tasks. Display and ordering only — it is
+   * NOT an instant and is never combined with dueDate into one, for the same reason
+   * dueDate is not an instant. Derived from the provider's due object; not editable.
+   */
+  dueTime: string | null
   estimatedPomodoros: number | null
   sortOrder: number
   completedAt: number | null
@@ -295,7 +302,7 @@ export interface TaskCreate {
 }
 
 export type TaskUpdate = Partial<
-  Omit<Task, 'id' | 'createdAt' | 'recurring' | 'remoteDeletedAt' | keyof SyncOrigin>
+  Omit<Task, 'id' | 'createdAt' | 'recurring' | 'remoteDeletedAt' | 'dueTime' | keyof SyncOrigin>
 >
 
 /** Task joined with counts derived from `sessions` and `subtasks`. Never stored. */

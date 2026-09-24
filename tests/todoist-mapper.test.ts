@@ -7,12 +7,13 @@
  */
 process.env.TZ = 'America/Los_Angeles'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   buildDueForDateChange,
   calendarDayFromDue,
   dueDateFromRemote,
   toLocalPriority,
+  toProjectColorHex,
   toRemotePriority
 } from '../src/main/integrations/todoist/mapper'
 
@@ -119,5 +120,76 @@ describe('buildDueForDateChange', () => {
       is_recurring: true,
       lang: 'en'
     })
+  })
+})
+
+describe('toProjectColorHex', () => {
+  it('maps every documented Todoist colour name to its hex, spot-checked', () => {
+    // developer.todoist.com/api/v1/ "Colors" section, verified 2026-09-24.
+    expect(toProjectColorHex('berry_red')).toBe('#B8255F')
+    expect(toProjectColorHex('charcoal')).toBe('#808080')
+    expect(toProjectColorHex('grey')).toBe('#999999')
+    expect(toProjectColorHex('taupe')).toBe('#8F7A69')
+    expect(toProjectColorHex('mint_green')).toBe('#42A393')
+    expect(toProjectColorHex('sky_blue')).toBe('#319DC0')
+  })
+
+  it('passes an already-hex value straight through', () => {
+    expect(toProjectColorHex('#6366f1')).toBe('#6366f1')
+  })
+
+  it('falls back to a sane default for an unknown name, null, or empty value', () => {
+    expect(toProjectColorHex('not_a_real_colour')).toBe('#808080')
+    expect(toProjectColorHex(null)).toBe('#808080')
+    expect(toProjectColorHex(undefined)).toBe('#808080')
+  })
+})
+
+describe('due dates use the DUE\'S OWN timezone, not the host clock', () => {
+  // Live bug: account zone Asia/Tehran (UTC+3:30, no DST since 2022), host machine
+  // Asia/Dubai (UTC+4:00, no DST) — a 30-minute, non-hour-boundary difference. A task due
+  // at 23:45 Tehran is 00:15 the NEXT day in Dubai, so reading the host clock alone files
+  // it under the wrong day.
+  const originalTZ = process.env.TZ
+  beforeEach(() => {
+    process.env.TZ = 'Asia/Dubai'
+  })
+  afterEach(() => {
+    process.env.TZ = originalTZ
+  })
+
+  // 23:45 in Asia/Tehran (UTC+3:30) on 2026-06-15 is 20:15 UTC, which is 00:15 on
+  // 2026-06-16 in Asia/Dubai (UTC+4:00) — the host's day is one later than Tehran's.
+  const tehran2345OnJune15 = '2026-06-15T20:15:00Z'
+
+  it('calendarDayFromDue takes the day in the due\'s timezone when given one', () => {
+    expect(calendarDayFromDue(tehran2345OnJune15, 'Asia/Tehran')).toBe('2026-06-15')
+  })
+
+  it('calendarDayFromDue falls back to the host day when no timezone is given', () => {
+    expect(calendarDayFromDue(tehran2345OnJune15)).toBe('2026-06-16')
+  })
+
+  it('calendarDayFromDue falls back to the host day for an invalid IANA name', () => {
+    expect(calendarDayFromDue(tehran2345OnJune15, 'Not/AZone')).toBe('2026-06-16')
+  })
+
+  it('dueDateFromRemote reads due.timezone through to the same effect', () => {
+    expect(dueDateFromRemote({ date: tehran2345OnJune15, timezone: 'Asia/Tehran' })).toBe('2026-06-15')
+    expect(dueDateFromRemote({ date: tehran2345OnJune15 })).toBe('2026-06-16')
+  })
+
+  it('buildDueForDateChange keeps the wall time in the due\'s own zone on the new day', () => {
+    const previous = {
+      date: tehran2345OnJune15,
+      timezone: 'Asia/Tehran',
+      string: 'tomorrow at 11:45pm',
+      is_recurring: false
+    }
+    const result = buildDueForDateChange('2026-07-01', previous)
+    expect(result?.timezone).toBe('Asia/Tehran')
+    // 23:45 Asia/Tehran on 2026-07-01 (no DST) is still 20:15 UTC — unaffected by the host
+    // being Asia/Dubai.
+    expect(result?.date).toBe('2026-07-01T20:15:00.000Z')
   })
 })

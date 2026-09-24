@@ -177,3 +177,111 @@ export function isRecurring(remoteDue: string | null): boolean {
     return false
   }
 }
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/**
+ * The wall-clock date and time an instant reads as in a given IANA zone, e.g. for reusing
+ * a provider's own `timezone` field rather than the host's — a Todoist due defined in
+ * Asia/Tehran must show the time the user actually set it to, even when the host machine
+ * sits in a different zone (Asia/Dubai, +30min off Tehran, is the case that surfaced this).
+ *
+ * `formatToParts` is used rather than slicing a formatted string, because `Intl` locale
+ * output is not a fixed layout to depend on. `timeZone` is validated implicitly: an invalid
+ * IANA name makes the `Intl.DateTimeFormat` constructor throw `RangeError`, which this
+ * function catches and turns into `null` rather than letting propagate — never throws.
+ */
+export function wallClockInZone(
+  ms: number,
+  timeZone: string
+): { dateKey: string; hhmm: string } | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(new Date(ms))
+
+    const get = (type: string): string | undefined => parts.find((p) => p.type === type)?.value
+    const year = get('year')
+    const month = get('month')
+    const day = get('day')
+    const hour = get('hour')
+    const minute = get('minute')
+    if (!year || !month || !day || !hour || !minute) return null
+
+    return { dateKey: `${year}-${month}-${day}`, hhmm: `${hour}:${minute}` }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Extract the wall-clock 'HH:MM' from a Todoist `due` object's JSON, or `null` when the due
+ * has no time component (or the JSON is malformed/unexpected).
+ *
+ * `due.date` comes in three shapes:
+ *  - 'YYYY-MM-DD' — date-only, no time → `null`.
+ *  - floating 'YYYY-MM-DDTHH:MM:SS' (no offset, no trailing `Z`) — there is no instant to
+ *    convert, so the HH:MM is taken verbatim, exactly as `due_date`'s own local-day mapping
+ *    treats a floating value.
+ *  - zoned 'YYYY-MM-DDTHH:MM:SSZ' or with a `±HH:MM` offset — a real instant. Todoist also
+ *    sends the zone the due was authored in as `due.timezone`; when present and a valid
+ *    IANA name, the wall time is read back IN THAT ZONE via `wallClockInZone` — this is the
+ *    time the user actually set (and what `due.string` describes), which can differ from
+ *    the host machine's own zone even when both are "close" (Asia/Tehran vs Asia/Dubai is a
+ *    30-minute, non-hour-boundary difference). Only when `timezone` is absent or invalid
+ *    does this fall back to the HOST's local zone via `Date`, as before.
+ *
+ * Never throws: malformed or unrecognised input degrades to `null`, same policy as
+ * `isRecurring` above.
+ */
+export function dueTimeFromRemoteDue(remoteDueJson: string | null): string | null {
+  if (remoteDueJson === null) return null
+  try {
+    const parsed: unknown = JSON.parse(remoteDueJson)
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const record = parsed as Record<string, unknown>
+    const date = record.date
+    if (typeof date !== 'string') return null
+
+    // Date-only: no time component at all.
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/
+    if (dateOnly.test(date)) return null
+
+    // Floating datetime: no trailing Z and no +/-HH:MM offset after the time.
+    const floating = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2}):\d{2}$/
+    const floatingMatch = floating.exec(date)
+    if (floatingMatch) {
+      const [, hh, mm] = floatingMatch
+      return `${hh}:${mm}`
+    }
+
+    // Zoned datetime: trailing Z or a +/-HH:MM offset. Convert via a real Date so the
+    // calendar day (and clock time) is derived correctly, not sliced out of the UTC string.
+    const zoned = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/
+    if (zoned.test(date)) {
+      const instant = new Date(date)
+      if (Number.isNaN(instant.getTime())) return null
+
+      const timezone = record.timezone
+      if (typeof timezone === 'string' && timezone.length > 0) {
+        const wall = wallClockInZone(instant.getTime(), timezone)
+        if (wall) return wall.hhmm
+        // Invalid/unrecognised IANA name: fall through to host-local below.
+      }
+
+      return `${pad2(instant.getHours())}:${pad2(instant.getMinutes())}`
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}

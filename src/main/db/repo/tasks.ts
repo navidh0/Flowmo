@@ -1,5 +1,6 @@
 import type { Priority, Project, TaskCreate, TaskUpdate, TaskWithStats } from '@shared/types'
 import {
+  dueTimeFromRemoteDue,
   getDb,
   isRecurring,
   num,
@@ -74,6 +75,7 @@ function mapTask(row: Row): TaskWithStats {
     notes: strOrNull(row, 'notes'),
     priority: toPriority(num(row, 'priority')),
     dueDate: strOrNull(row, 'due_date'),
+    dueTime: dueTimeFromRemoteDue(strOrNull(row, 'remote_due')),
     estimatedPomodoros: numOrNull(row, 'estimated_pomodoros'),
     sortOrder: num(row, 'sort_order'),
     completedAt: numOrNull(row, 'completed_at'),

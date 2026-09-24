@@ -62,6 +62,25 @@ function assertProjectEditable(id: number, patch?: ProjectUpdate): void {
 }
 
 export function registerIpcHandlers(ctx: IpcContext): void {
+  /**
+   * Local edits to synced rows are queued in the outbox by the repos, but the periodic
+   * cycle is minutes apart — completing a recurring task would leave it sitting in Today
+   * until the next one brought back its advanced due date. Push shortly after the last
+   * write instead; debounced so a burst of edits (typing a title, ticking subtasks) goes
+   * up as one request. syncNow() already serialises against a running cycle.
+   */
+  let pushTimer: NodeJS.Timeout | null = null
+  const pushSoon = <T>(result: T): T => {
+    if (ctx.todoist.status().pendingChanges > 0) {
+      if (pushTimer) clearTimeout(pushTimer)
+      pushTimer = setTimeout(() => {
+        pushTimer = null
+        void ctx.todoist.syncNow()
+      }, 1500)
+    }
+    return result
+  }
+
   // ── timer ──
   ipcMain.handle(CH.timer.getState, () => ctx.timer.getState())
   // Deliberately `number | null | undefined`: an omitted argument keeps the current task,
@@ -107,17 +126,17 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     tasksRepo.listCompleted(projectId, limit)
   )
   ipcMain.handle(CH.tasks.get, (_e, id: number) => tasksRepo.get(id))
-  ipcMain.handle(CH.tasks.create, (_e, input: TaskCreate) => tasksRepo.create(input))
+  ipcMain.handle(CH.tasks.create, (_e, input: TaskCreate) => pushSoon(tasksRepo.create(input)))
   ipcMain.handle(CH.tasks.update, (_e, id: number, patch: TaskUpdate) =>
-    tasksRepo.update(id, patch)
+    pushSoon(tasksRepo.update(id, patch))
   )
   ipcMain.handle(CH.tasks.setCompleted, (_e, id: number, completed: boolean) =>
-    tasksRepo.setCompleted(id, completed)
+    pushSoon(tasksRepo.setCompleted(id, completed))
   )
   ipcMain.handle(CH.tasks.reorder, (_e, ids: number[]) => tasksRepo.reorder(ids))
   ipcMain.handle(CH.tasks.keepLocal, (_e, id: number) => tasksRepo.keepLocal(id))
   ipcMain.handle(CH.tasks.remove, (_e, id: number) => {
-    tasksRepo.remove(id)
+    pushSoon(tasksRepo.remove(id))
     // The running session points at a task that no longer exists; drop the reference
     // rather than leave the timer attributing time to a ghost.
     if (ctx.timer.getState().taskId === id) ctx.timer.setTask(null)
@@ -125,11 +144,13 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   // ── subtasks ──
   ipcMain.handle(CH.subtasks.list, (_e, taskId: number) => subtasksRepo.list(taskId))
-  ipcMain.handle(CH.subtasks.create, (_e, input: SubtaskCreate) => subtasksRepo.create(input))
-  ipcMain.handle(CH.subtasks.update, (_e, id: number, patch: SubtaskUpdate) =>
-    subtasksRepo.update(id, patch)
+  ipcMain.handle(CH.subtasks.create, (_e, input: SubtaskCreate) =>
+    pushSoon(subtasksRepo.create(input))
   )
-  ipcMain.handle(CH.subtasks.remove, (_e, id: number) => subtasksRepo.remove(id))
+  ipcMain.handle(CH.subtasks.update, (_e, id: number, patch: SubtaskUpdate) =>
+    pushSoon(subtasksRepo.update(id, patch))
+  )
+  ipcMain.handle(CH.subtasks.remove, (_e, id: number) => pushSoon(subtasksRepo.remove(id)))
 
   // ── sessions ──
   ipcMain.handle(CH.sessions.listRange, (_e, fromMs: number, toMs: number) =>

@@ -49,13 +49,35 @@ export function nextLocalMidnight(nowMs: number): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0).getTime()
 }
 
+function toMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number)
+  return (h ?? 0) * 60 + (m ?? 0)
+}
+
 /**
- * The clock reading that determines a task's place in the user's day: `dueTimeLocal` when the
- * due has a zone (this computer's clock, which is the real order events happen in for
- * whoever is looking at the screen), falling back to `dueTime` for a zone-less/floating due.
+ * The clock reading (minutes since local midnight) that determines a task's place in the
+ * user's day: `dueTimeLocal` when the due has a zone (this computer's clock, which is the
+ * real order events happen in for whoever is looking at the screen), falling back to
+ * `dueTime` for a zone-less/floating due.
+ *
+ * A due converted from another zone can land on the OTHER side of local midnight from its
+ * own-zone reading — "23:30 Tehran" is "00:00" the same local calendar day in Dubai, i.e.
+ * effectively just past midnight, not first thing. Zone offsets are at most ±14h, so a gap
+ * of more than 12h between the two readings can only be that wrap, never a same-direction
+ * difference: shift the local reading by a full day so it still sorts after the tasks it
+ * actually follows instead of jumping to the front (or back) of the list.
  */
-function orderingTime(task: Pick<TaskWithStats, 'dueTime' | 'dueTimeLocal'>): string | null {
-  return task.dueTimeLocal ?? task.dueTime
+function orderingMinutes(task: Pick<TaskWithStats, 'dueTime' | 'dueTimeLocal'>): number | null {
+  const own = task.dueTime
+  const local = task.dueTimeLocal
+  if (local === null) return own !== null ? toMinutes(own) : null
+  if (own === null) return toMinutes(local)
+
+  let localMinutes = toMinutes(local)
+  const diff = localMinutes - toMinutes(own)
+  if (diff < -720) localMinutes += 1440
+  else if (diff > 720) localMinutes -= 1440
+  return localMinutes
 }
 
 /**
@@ -63,10 +85,10 @@ function orderingTime(task: Pick<TaskWithStats, 'dueTime' | 'dueTimeLocal'>): st
  * ties by priority (1 = highest), then by the task's persisted sort order.
  */
 function compareWithinGroup(a: TaskWithStats, b: TaskWithStats): number {
-  const at = orderingTime(a)
-  const bt = orderingTime(b)
+  const at = orderingMinutes(a)
+  const bt = orderingMinutes(b)
   if (at !== null && bt !== null) {
-    if (at !== bt) return at < bt ? -1 : 1
+    if (at !== bt) return at - bt
   } else if (at !== null) {
     return -1
   } else if (bt !== null) {

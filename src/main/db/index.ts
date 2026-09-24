@@ -15,6 +15,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
 import type { SyncSource } from '@shared/types'
 import { runMigrations } from './migrations'
+import { backupOnOpen } from './backup'
 
 let handle: DatabaseSync | null = null
 
@@ -36,6 +37,7 @@ export function getDb(): DatabaseSync {
   db.exec('PRAGMA busy_timeout = 5000')
 
   runMigrations(db)
+  backupOnOpen(db, app.getPath('userData'))
 
   handle = db
   return handle

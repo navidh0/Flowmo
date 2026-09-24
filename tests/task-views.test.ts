@@ -170,21 +170,58 @@ describe('selectToday', () => {
   })
 
   it('orders by dueTimeLocal, not the provider-zone dueTime, when they disagree', () => {
-    // "Due 07:15 Tehran" lands at 20:45 the PREVIOUS local evening for this computer — later
-    // in provider-time but far EARLIER in the local day than a plain 08:00 local task.
+    // "Due 07:15 Tehran" is 09:45 on this computer's clock (a smaller, same-day offset, well
+    // under the 12h wrap threshold) — later locally than its own dueTime, and later than a
+    // plain 08:00 local task even though 07:15 < 08:00 as raw dueTime strings.
     const earlyProviderTimeButLateLocally = task({
       dueDate: TODAY,
       dueTime: '07:15',
       dueZone: 'Asia/Tehran',
-      dueTimeLocal: '20:45',
+      dueTimeLocal: '09:45',
       sortOrder: 1
     })
     const plainLocal = task({ dueDate: TODAY, dueTime: '08:00', sortOrder: 2 })
 
     const { today } = selectToday([earlyProviderTimeButLateLocally, plainLocal], TODAY)
 
-    // 08:00 local sorts before 20:45 local, even though 07:15 < 08:00 as raw dueTime strings.
     expect(today.map((t) => t.id)).toEqual([plainLocal.id, earlyProviderTimeButLateLocally.id])
+  })
+
+  it('treats a >12h gap between dueTime and dueTimeLocal as a midnight wrap, not a huge offset', () => {
+    // 23:30 Tehran is 00:00 the same local calendar day somewhere further east — just after
+    // midnight by the bare clock reading, but really the LAST thing due that day, not the
+    // first. Sorted among an early-morning and an evening task, it must land last.
+    const earlyMorning = task({ dueDate: TODAY, dueTime: '07:15', dueTimeLocal: null, sortOrder: 1 })
+    const evening = task({ dueDate: TODAY, dueTime: '19:30', dueTimeLocal: null, sortOrder: 2 })
+    const wrapsPastMidnight = task({
+      dueDate: TODAY,
+      dueTime: '23:30',
+      dueZone: 'Asia/Tehran',
+      dueTimeLocal: '00:00',
+      sortOrder: 3
+    })
+
+    const { today } = selectToday([wrapsPastMidnight, earlyMorning, evening], TODAY)
+
+    expect(today.map((t) => t.id)).toEqual([earlyMorning.id, evening.id, wrapsPastMidnight.id])
+  })
+
+  it('the reverse wrap (own time just after midnight, local reading late the previous evening) sorts first', () => {
+    // Own-zone 00:15 converts to 23:45 local — the previous local evening by the bare clock
+    // reading, but really the FIRST thing due, before anything else that calendar day.
+    const wrapsBeforeMidnight = task({
+      dueDate: TODAY,
+      dueTime: '00:15',
+      dueZone: 'Pacific/Kiritimati',
+      dueTimeLocal: '23:45',
+      sortOrder: 1
+    })
+    const morning = task({ dueDate: TODAY, dueTime: '07:15', dueTimeLocal: null, sortOrder: 2 })
+    const evening = task({ dueDate: TODAY, dueTime: '19:30', dueTimeLocal: null, sortOrder: 3 })
+
+    const { today } = selectToday([evening, morning, wrapsBeforeMidnight], TODAY)
+
+    expect(today.map((t) => t.id)).toEqual([wrapsBeforeMidnight.id, morning.id, evening.id])
   })
 })
 

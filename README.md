@@ -28,9 +28,12 @@ minutes spent, even though it didn't complete a round.
 ## Features
 
 - Projects, tasks and subtasks, with priorities, due dates, estimates, and
-  drag-to-reorder.
-- A Day screen: a timeline of the sessions you actually worked, alongside any
-  calendar events for that day, laid out in columns where they overlap.
+  drag-to-reorder. The task list opens on **Today** — overdue first, then
+  by time — with **Upcoming** covering the next seven days.
+- A Calendar screen with Day, Week and Month views: the sessions you
+  actually worked alongside your calendar events. When a task or event was
+  set in a different time zone than your computer's, both times are shown
+  (for example "07:15 Tehran · 07:45 local").
 - A stats page: today / week / year / all-time ranges, a daily chart, a
   per-project breakdown, a Pomodoro-vs-Flowmodoro split, and a streak.
 - Session history with per-session delete.
@@ -70,10 +73,10 @@ deletes them, and it never deletes the time already logged against them.
 
 Add a calendar's **Secret address in iCal format** (in Google Calendar: the
 calendar's ⋮ menu → Settings and sharing → "Secret address in iCal format") to
-show its events on the Day screen. This is read-only — Flowdo never writes back
+show its events on the Calendar screen. This is read-only — Flowdo never writes back
 to your calendar.
 
-Events are cached roughly two weeks back and two months ahead of today, and the
+Events are cached roughly six weeks back and four months ahead of today, and the
 feed can lag slightly behind what's on Google's side.
 
 ### Security

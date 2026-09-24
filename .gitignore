@@ -14,3 +14,6 @@ CLAUDE.md
 scratchpad/
 
 # Local rewrite safety net (see .claude/plans/). Never pushed.
+
+# TypeScript incremental build state
+*.tsbuildinfo

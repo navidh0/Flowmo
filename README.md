@@ -29,6 +29,8 @@ minutes spent, even though it didn't complete a round.
 
 - Projects, tasks and subtasks, with priorities, due dates, estimates, and
   drag-to-reorder.
+- A Day screen: a timeline of the sessions you actually worked, alongside any
+  calendar events for that day, laid out in columns where they overlap.
 - A stats page: today / week / year / all-time ranges, a daily chart, a
   per-project breakdown, a Pomodoro-vs-Flowmodoro split, and a streak.
 - Session history with per-session delete.
@@ -42,6 +44,50 @@ minutes spent, even though it didn't complete a round.
 - JSON export and import. Import **replaces** the entire database — it is not a
   merge — and Flowdo writes a timestamped backup of the existing database before
   touching anything, so a bad import can be undone by restoring that backup file.
+
+## Integrations
+
+### Todoist
+
+Connect a Todoist account to sync tasks and subtasks two-way, using your personal
+API token. Find it in Todoist under **Settings → Integrations → Developer → API
+token**.
+
+Projects come from Todoist and are read-only in Flowdo — rename or delete them in
+Todoist itself. Completing a recurring task advances it to its next occurrence,
+the same as it would in Todoist. If a task is deleted on the Todoist side, Flowdo
+marks it rather than removing it, and you choose whether to keep it as a local
+task or delete it.
+
+Sync runs every few minutes and again whenever you bring the window back into
+focus. Changes you make while offline are queued and sent once you're back
+online.
+
+Disconnecting turns your synced tasks into ordinary local tasks — it never
+deletes them, and it never deletes the time already logged against them.
+
+### Google Calendar
+
+Add a calendar's **Secret address in iCal format** (in Google Calendar: the
+calendar's ⋮ menu → Settings and sharing → "Secret address in iCal format") to
+show its events on the Day screen. This is read-only — Flowdo never writes back
+to your calendar.
+
+Events are cached roughly two weeks back and two months ahead of today, and the
+feed can lag slightly behind what's on Google's side.
+
+### Security
+
+Your Todoist token and calendar addresses are stored encrypted, using the
+operating system's secure storage, and never leave the main process. If secure
+storage isn't available on your machine, Flowdo refuses to store them rather than
+fall back to storing them unencrypted. Exported data never includes them, and
+nothing is sent anywhere except to Todoist and the calendar addresses you
+add.
+
+Note: JSON import is refused while Todoist is connected, since the imported data
+could conflict with what's actively syncing — disconnect first if you need to
+import.
 
 ## Install
 
@@ -84,5 +130,5 @@ pre-import state is always recoverable.
 
 ## Roadmap
 
-See `docs/ROADMAP.md` for the full plan. Next up after the current release:
-Todoist and Google Calendar integrations.
+See `docs/ROADMAP.md` for the full plan. In progress: Todoist and Google
+Calendar integrations, and a day timeline.

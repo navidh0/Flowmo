@@ -24,10 +24,6 @@ by accumulating ticks, so it survives background throttling and machine sleep. A
 than the configured grace period marks the session interrupted and subtracts the gap — sleeping
 for an hour is not an hour of focus.
 
----
-
-## Planned
-
 ### v0.2 — seeing your history
 
 v0.1 records your focus history and gives you no way to look at it. The statistics layer exists
@@ -46,7 +42,35 @@ honoured but cannot be changed outside of a developer console.
   you don't want, and the arrangement persists across restarts. The window remembers its size
   and position too.
 
-### v0.3 — Linux, and a real release pipeline
+---
+
+## In progress
+
+### v0.3 — Todoist, Google Calendar, and a day timeline
+
+Pull real work in rather than retyping it, and see the day you actually have before deciding
+what to focus on next. This moved ahead of the Linux port because it's the pair of features most
+likely to change how the app gets used day to day.
+
+- **Todoist, two-way** — sync tasks and subtasks using your personal API token. Projects come
+  from Todoist and are read-only in Flowdo; rename or delete them there instead. Completing a
+  recurring task advances it, the same as it would in Todoist. A task deleted upstream is marked
+  rather than removed, and you choose whether to keep it locally or delete it. Sync runs every
+  few minutes and again when you bring the window back into focus; changes made offline are sent
+  once you're back. Disconnecting converts synced tasks to local ones and never touches the time
+  already logged against them.
+- **Google Calendar, read-only** — via a calendar's "Secret address in iCal format", no OAuth.
+  Events are cached roughly two weeks back and two months ahead, and render on the day timeline
+  below.
+- **Day timeline** — a day view of the sessions you actually worked, alongside calendar events,
+  overlaps laid out in columns.
+- **Credentials stored through the operating system's secure storage.** Where no secure backend
+  is available, Flowdo declines to store the secret and says why rather than falling back to
+  plain text. Tokens and calendar addresses never leave the main process, are never included in
+  an export, and no client secret is embedded in the source. JSON import is refused while
+  Todoist is connected, since imported data could conflict with what's actively syncing.
+
+### v0.4 — Linux, and a real release pipeline
 
 - AppImage and `.deb` builds alongside the Windows installer.
 - Automatic updates via GitHub Releases, with a manual check in Settings.
@@ -55,35 +79,27 @@ honoured but cannot be changed outside of a developer console.
   unavailable under Wayland, for instance; the app says so rather than appearing to accept a
   binding that will never fire.
 
-### v0.4 — making it yours
+### v0.5 — making it yours
 
-- **Session timeline** — a day and week view of what you actually worked on and when.
 - **Light theme** — following the OS by default, overridable in Settings.
 - **Real notification sounds**, replacing the current system beep.
 - **Layout, continued** — reorder the panels, a compact density mode, and a resizable mini widget.
 
-### v0.5 — calendars
+---
 
-See the day you actually have before deciding what to focus on. Calendar events render alongside
-the session timeline from v0.4.
+## Planned
 
-- Google Calendar first, read-only, then CalDAV and plain `.ics` subscriptions.
-- Credentials are stored through the operating system's secure storage — DPAPI on Windows, the
-  system keyring on Linux. Where no secure backend is available, Flowdo declines to store the
-  token and says why rather than falling back to plain text.
-- Tokens never leave the main process, are never included in an export, and no client secret is
-  embedded in the source.
+### Hardening toward v1.0
 
-### v0.6 — task sources
+Keyboard navigation throughout, proper error and offline states for every integration, a
+first-run onboarding pass, a data-integrity review covering backup and restore, and a privacy
+statement covering exactly what the integrations read and where credentials live.
 
-Pull real work items in rather than retyping them: Todoist first, then Jira. Read-only to begin
-with. Deleting or unsyncing a task never erases the time already recorded against it.
+### Later, unscheduled
 
-### v1.0 — polish
-
-Keyboard navigation throughout, proper error and offline states for every integration, a first-run
-onboarding pass, a data-integrity review covering backup and restore, and a privacy statement
-covering exactly what the integrations read and where credentials live.
+- **Jira**, as an additional read-only task source alongside Todoist.
+- **Google Calendar over OAuth**, for calendars that can't expose a secret iCal address (or as a
+  more robust alternative to it).
 
 ---
 

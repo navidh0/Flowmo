@@ -1,4 +1,4 @@
-import type { Priority, TaskCreate, TaskUpdate, TaskWithStats } from '@shared/types'
+import type { Priority, Project, TaskCreate, TaskUpdate, TaskWithStats } from '@shared/types'
 import {
   getDb,
   isRecurring,
@@ -12,6 +12,14 @@ import {
   tx,
   type Row
 } from '../index'
+import {
+  onLocalTaskCompleted,
+  onLocalTaskCreated,
+  onLocalTaskMoved,
+  onLocalTaskRemoved,
+  onLocalTaskUpdated
+} from '../../integrations/todoist'
+import * as projectsRepo from './projects'
 
 /**
  * Tasks are always read with their derived counts attached, via two pre-grouped
@@ -120,85 +128,128 @@ function requireTask(id: number): TaskWithStats {
   return task
 }
 
+function requireProject(id: number): Project {
+  const project = projectsRepo.get(id)
+  if (!project) throw new Error(`tasks: no project with id ${id}`)
+  return project
+}
+
 export function create(input: TaskCreate): TaskWithStats {
-  // New tasks land at the bottom of their own project's list, not of the global list.
-  const next = scalarNum(
-    'SELECT COALESCE(MAX(sort_order) + 1, 0) AS value FROM tasks WHERE project_id = ?',
-    [input.projectId]
-  )
-
-  const result = getDb()
-    .prepare(
-      `INSERT INTO tasks
-         (project_id, title, notes, priority, due_date, estimated_pomodoros, sort_order, completed_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`
-    )
-    .run(
-      input.projectId,
-      input.title,
-      input.notes ?? null,
-      input.priority ?? 3,
-      input.dueDate ?? null,
-      input.estimatedPomodoros ?? null,
-      next,
-      Date.now()
+  return tx((db) => {
+    // New tasks land at the bottom of their own project's list, not of the global list.
+    const next = scalarNum(
+      'SELECT COALESCE(MAX(sort_order) + 1, 0) AS value FROM tasks WHERE project_id = ?',
+      [input.projectId]
     )
 
-  return requireTask(rowId(result.lastInsertRowid))
+    const result = db
+      .prepare(
+        `INSERT INTO tasks
+           (project_id, title, notes, priority, due_date, estimated_pomodoros, sort_order, completed_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`
+      )
+      .run(
+        input.projectId,
+        input.title,
+        input.notes ?? null,
+        input.priority ?? 3,
+        input.dueDate ?? null,
+        input.estimatedPomodoros ?? null,
+        next,
+        Date.now()
+      )
+
+    const id = rowId(result.lastInsertRowid)
+    const project = requireProject(input.projectId)
+    // Self-guarded: a no-op unless `project` is todoist-sourced.
+    onLocalTaskCreated(db, requireTask(id), project)
+
+    return requireTask(id)
+  })
 }
 
 export function update(id: number, patch: TaskUpdate): TaskWithStats {
-  const sets: string[] = []
-  const values: Array<string | number | null> = []
+  return tx((db) => {
+    const before = requireTask(id)
 
-  if (patch.projectId !== undefined) {
-    sets.push('project_id = ?')
-    values.push(patch.projectId)
-  }
-  if (patch.title !== undefined) {
-    sets.push('title = ?')
-    values.push(patch.title)
-  }
-  if (patch.notes !== undefined) {
-    sets.push('notes = ?')
-    values.push(patch.notes)
-  }
-  if (patch.priority !== undefined) {
-    sets.push('priority = ?')
-    values.push(patch.priority)
-  }
-  if (patch.dueDate !== undefined) {
-    sets.push('due_date = ?')
-    values.push(patch.dueDate)
-  }
-  if (patch.estimatedPomodoros !== undefined) {
-    sets.push('estimated_pomodoros = ?')
-    values.push(patch.estimatedPomodoros)
-  }
-  if (patch.sortOrder !== undefined) {
-    sets.push('sort_order = ?')
-    values.push(patch.sortOrder)
-  }
-  if (patch.completedAt !== undefined) {
-    sets.push('completed_at = ?')
-    values.push(patch.completedAt)
-  }
+    if (patch.projectId !== undefined && patch.projectId !== before.projectId) {
+      const toProject = requireProject(patch.projectId)
+      // A todoist-sourced task may only move between projects of the same source — Todoist
+      // has no concept of "moved out to a local list", so the repo rejects it outright rather
+      // than silently detaching the task from sync.
+      if (before.source === 'todoist' && toProject.source !== before.source) {
+        throw new Error('A Todoist task can only move to another Todoist project.')
+      }
+      // Self-guarded on `toProject.source`: a local->local move is a no-op here.
+      onLocalTaskMoved(db, before, toProject)
+    }
 
-  if (sets.length > 0) {
-    getDb()
-      .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`)
-      .run(...values, id)
-  }
+    const sets: string[] = []
+    const values: Array<string | number | null> = []
 
-  return requireTask(id)
+    if (patch.projectId !== undefined) {
+      sets.push('project_id = ?')
+      values.push(patch.projectId)
+    }
+    if (patch.title !== undefined) {
+      sets.push('title = ?')
+      values.push(patch.title)
+    }
+    if (patch.notes !== undefined) {
+      sets.push('notes = ?')
+      values.push(patch.notes)
+    }
+    if (patch.priority !== undefined) {
+      sets.push('priority = ?')
+      values.push(patch.priority)
+    }
+    if (patch.dueDate !== undefined) {
+      sets.push('due_date = ?')
+      values.push(patch.dueDate)
+    }
+    if (patch.estimatedPomodoros !== undefined) {
+      sets.push('estimated_pomodoros = ?')
+      values.push(patch.estimatedPomodoros)
+    }
+    if (patch.sortOrder !== undefined) {
+      sets.push('sort_order = ?')
+      values.push(patch.sortOrder)
+    }
+    if (patch.completedAt !== undefined) {
+      sets.push('completed_at = ?')
+      values.push(patch.completedAt)
+    }
+
+    if (sets.length > 0) {
+      db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...values, id)
+    }
+
+    // Self-guarded on `before.source`: pushes only title/notes/priority/dueDate, and only
+    // whatever of those actually changed.
+    onLocalTaskUpdated(db, before, patch)
+
+    return requireTask(id)
+  })
 }
 
 /** Completion is stored as the instant it happened, so "done today" is answerable. */
 export function setCompleted(id: number, completed: boolean): TaskWithStats {
-  getDb()
-    .prepare('UPDATE tasks SET completed_at = ? WHERE id = ?')
-    .run(completed ? Date.now() : null, id)
-  return requireTask(id)
+  return tx((db) => {
+    const before = requireTask(id)
+
+    // A recurring synced task never gets a local completed_at: `item_close` advances its
+    // due date upstream and leaves it open, and the next pull brings that date back. Setting
+    // completed_at here would show it as done locally while Todoist still considers it live.
+    const staysOpen = completed && before.source === 'todoist' && before.recurring
+    if (!staysOpen) {
+      db.prepare('UPDATE tasks SET completed_at = ? WHERE id = ?').run(completed ? Date.now() : null, id)
+    }
+
+    // Self-guarded on `before.source`.
+    onLocalTaskCompleted(db, before, completed)
+
+    return requireTask(id)
+  })
 }
 
 /** One transaction: a drag that half-applies would leave two tasks claiming one slot. */
@@ -212,5 +263,49 @@ export function reorder(ids: number[]): void {
 }
 
 export function remove(id: number): void {
-  getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  tx((db) => {
+    const task = requireTask(id)
+    // Self-guarded on `task.source`/`remoteDeletedAt`; must run before the row is gone.
+    onLocalTaskRemoved(db, task)
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  })
+}
+
+/**
+ * Turn a synced task (and its subtasks) into purely local ones: drop every sync-owned field
+ * and cancel whatever was still queued to push for it, without sending anything upstream.
+ * This is the "keep it" answer to a task Todoist deleted out from under the user.
+ */
+export function keepLocal(id: number): TaskWithStats {
+  return tx((db) => {
+    const task = requireTask(id)
+
+    const subtaskExternalIds = db
+      .prepare('SELECT external_id FROM subtasks WHERE task_id = ? AND external_id IS NOT NULL')
+      .all(id) as Row[]
+
+    const externalIds = [
+      task.externalId,
+      ...subtaskExternalIds.map((row) => str(row, 'external_id'))
+    ].filter((value): value is string => value !== null)
+
+    // Cancels pending commands by temp_id (not-yet-pushed rows) and by a plain-text scan of
+    // `args` (a pushed row's real id may still be referenced by a later queued command) —
+    // the same pattern the outbox itself uses to retract a temp id.
+    for (const externalId of externalIds) {
+      db.prepare(
+        "DELETE FROM sync_outbox WHERE source = 'todoist' AND (temp_id = ? OR args LIKE ?)"
+      ).run(externalId, `%${externalId}%`)
+    }
+
+    db.prepare(
+      `UPDATE tasks
+       SET source = NULL, external_id = NULL, remote_due = NULL,
+           remote_updated_at = NULL, remote_deleted_at = NULL
+       WHERE id = ?`
+    ).run(id)
+    db.prepare('UPDATE subtasks SET source = NULL, external_id = NULL WHERE task_id = ?').run(id)
+
+    return requireTask(id)
+  })
 }

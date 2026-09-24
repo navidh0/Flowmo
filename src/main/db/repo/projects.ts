@@ -54,6 +54,10 @@ function find(id: number): Project | null {
   return row ? mapProject(row) : null
 }
 
+export function get(id: number): Project | null {
+  return find(id)
+}
+
 export function list(includeArchived = false): Project[] {
   const sql = includeArchived
     ? `SELECT ${COLUMNS} FROM projects ORDER BY sort_order, id`

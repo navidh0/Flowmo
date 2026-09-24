@@ -19,7 +19,15 @@ import type { DragEvent } from 'react'
 import type { Project, TaskWithStats } from '@shared/types'
 import { TargetIcon, WarningIcon } from '@renderer/components/timer/icons'
 import { PRIORITY_LABEL, PRIORITY_VAR, formatDueDate, formatDuration } from '@renderer/lib/format'
-import { CalendarIcon, CheckIcon, ChecklistIcon, ClockIcon, GripIcon } from './icons'
+import {
+  CalendarIcon,
+  CheckIcon,
+  ChecklistIcon,
+  ClockIcon,
+  GripIcon,
+  RepeatIcon,
+  TodoistIcon
+} from './icons'
 import { HOVER_ACTION } from './ui'
 
 export interface RowDrag {
@@ -99,6 +107,16 @@ export function TaskRow({
   const hasEstimate = task.estimatedPomodoros !== null
   const showPomodoros = hasEstimate || task.actualPomodoros > 0
 
+  const synced = task.source === 'todoist'
+  const deletedUpstream = task.remoteDeletedAt !== null
+  const completeTitle = deletedUpstream
+    ? 'Deleted in Todoist — open it to decide what happens next'
+    : completed
+      ? 'Move back to open'
+      : task.recurring
+        ? `Complete · advances to the next occurrence · ${PRIORITY_LABEL[task.priority]}`
+        : `Complete · ${PRIORITY_LABEL[task.priority]}`
+
   return (
     <li
       className={`group relative flex items-start gap-2.5 rounded-lg border px-2.5 py-2 transition-colors ${
@@ -107,7 +125,9 @@ export function TaskRow({
         selected
           ? 'border-[var(--color-focus)]/55 bg-[var(--color-surface-raised)]'
           : 'border-transparent hover:border-[var(--color-border)] hover:bg-[var(--color-surface-raised)]/70'
-      } ${focused && !selected ? 'bg-[color-mix(in_srgb,var(--color-focus)_10%,transparent)]' : ''}`}
+      } ${focused && !selected ? 'bg-[color-mix(in_srgb,var(--color-focus)_10%,transparent)]' : ''} ${
+        deletedUpstream ? 'opacity-70' : ''
+      }`}
       draggable={drag !== undefined}
       onDragStart={drag?.onDragStart}
       onDragOver={drag?.onDragOver}
@@ -132,9 +152,13 @@ export function TaskRow({
         type="button"
         role="checkbox"
         aria-checked={completed}
-        title={completed ? 'Move back to open' : `Complete · ${PRIORITY_LABEL[task.priority]}`}
+        title={completeTitle}
         aria-label={
-          completed ? `Reopen ${task.title}` : `Complete ${task.title}, ${PRIORITY_LABEL[task.priority]}`
+          completed
+            ? `Reopen ${task.title}`
+            : task.recurring
+              ? `Complete ${task.title} — advances to the next occurrence`
+              : `Complete ${task.title}, ${PRIORITY_LABEL[task.priority]}`
         }
         onClick={onToggleComplete}
         className="mt-[2px] grid h-[17px] w-[17px] shrink-0 place-items-center rounded-full border-[1.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]/45"
@@ -179,7 +203,33 @@ export function TaskRow({
           >
             {task.title}
           </span>
+          {synced ? (
+            <span
+              className="shrink-0 text-[var(--color-text-muted)]"
+              title="Synced from Todoist"
+            >
+              <TodoistIcon />
+            </span>
+          ) : null}
+          {task.recurring ? (
+            <span
+              className="shrink-0 text-[var(--color-text-muted)]"
+              title="Recurring — completing it advances to the next occurrence instead of closing it for good"
+            >
+              <RepeatIcon className="h-3 w-3" />
+            </span>
+          ) : null}
         </div>
+
+        {deletedUpstream ? (
+          <div
+            className="mt-[3px] inline-flex items-center gap-1 text-[11px] leading-4 text-[var(--color-danger)]"
+            title="This task was deleted in Todoist. Open it to keep it as a local task or delete it here."
+          >
+            <WarningIcon className="h-3 w-3" />
+            <span>Deleted in Todoist</span>
+          </div>
+        ) : null}
 
         {due !== null || showPomodoros || task.focusMs > 0 || task.subtaskTotal > 0 || project ? (
           <div className="mt-[3px] flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-4">

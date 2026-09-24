@@ -16,6 +16,7 @@ import { useTimerStore, useTimerSync } from './stores/timer'
 // which is what opens every time, never needs it.
 const StatsPage = lazy(() => import('./components/stats'))
 const SettingsPage = lazy(() => import('./components/settings/SettingsPage'))
+const TimelinePage = lazy(() => import('./components/timeline'))
 
 /**
  * The mini widget is a second BrowserWindow loading the same bundle at `#/mini`
@@ -69,7 +70,8 @@ function MainShell(): React.JSX.Element {
     void window.flowdo.settings.set({ layout: next })
   }, [])
 
-  const secondary = screen === 'stats' ? <StatsPage /> : <SettingsPage />
+  const secondary =
+    screen === 'day' ? <TimelinePage /> : screen === 'stats' ? <StatsPage /> : <SettingsPage />
 
   return (
     <div className="flex h-full min-h-0 bg-[var(--color-surface)]">

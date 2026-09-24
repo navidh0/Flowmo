@@ -17,6 +17,7 @@ import { BehaviorSection } from './sections/BehaviorSection'
 import { DataSection } from './sections/DataSection'
 import { FlowmodoroSection } from './sections/FlowmodoroSection'
 import { HotkeysSection } from './sections/HotkeysSection'
+import { IntegrationsSection } from './integrations'
 import { LayoutSection } from './sections/LayoutSection'
 import { SystemSection } from './sections/SystemSection'
 import { TimerSection } from './sections/TimerSection'
@@ -53,6 +54,7 @@ export default function SettingsPage(): React.JSX.Element {
         <BehaviorSection settings={settings} set={set} />
         <SystemSection settings={settings} set={set} />
         <HotkeysSection settings={settings} set={set} />
+        <IntegrationsSection />
         <LayoutSection set={set} />
         <DataSection />
       </div>

@@ -10,6 +10,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { CH } from '@shared/channels'
 import type {
+  CalendarFeedCreate,
+  CalendarFeedUpdate,
   OnRunningSession,
   ProjectCreate,
   ProjectUpdate,
@@ -22,7 +24,9 @@ import type {
   TimerMode
 } from '@shared/types'
 import type { TimerService } from './timer'
-import { getHotkeyFailures, probeHotkey } from './hotkeys'
+import { getHotkeyFailures, probeHotkey, setHotkeysSuspended } from './hotkeys'
+import type { TodoistIntegration } from './integrations/todoist'
+import type { CalendarIntegration } from './integrations/ical'
 import { exportJson, importJson } from './dataio'
 import * as projectsRepo from './db/repo/projects'
 import * as tasksRepo from './db/repo/tasks'
@@ -41,6 +45,20 @@ export interface IpcContext {
    * settings, hotkeys, login item, mini widget, and the renderers' own stores.
    */
   reloadAfterImport(): void
+  todoist: TodoistIntegration
+  calendars: CalendarIntegration
+}
+
+/**
+ * Synced projects mirror Todoist and are never pushed back (pull-only, decided at the v0.3
+ * freeze). The UI hides these actions, but a renamed synced project would silently revert
+ * on the next pull, so main refuses them too rather than trusting the button being hidden.
+ */
+function assertProjectEditable(id: number, patch?: ProjectUpdate): void {
+  const project = projectsRepo.get(id)
+  if (!project || project.source === null) return
+  if (patch && patch.name === undefined && patch.archived === undefined) return
+  throw new Error('This project comes from Todoist — rename, archive or delete it there.')
 }
 
 export function registerIpcHandlers(ctx: IpcContext): void {
@@ -74,10 +92,14 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     projectsRepo.list(includeArchived)
   )
   ipcMain.handle(CH.projects.create, (_e, input: ProjectCreate) => projectsRepo.create(input))
-  ipcMain.handle(CH.projects.update, (_e, id: number, patch: ProjectUpdate) =>
-    projectsRepo.update(id, patch)
-  )
-  ipcMain.handle(CH.projects.remove, (_e, id: number) => projectsRepo.remove(id))
+  ipcMain.handle(CH.projects.update, (_e, id: number, patch: ProjectUpdate) => {
+    assertProjectEditable(id, patch)
+    return projectsRepo.update(id, patch)
+  })
+  ipcMain.handle(CH.projects.remove, (_e, id: number) => {
+    assertProjectEditable(id)
+    return projectsRepo.remove(id)
+  })
 
   // ── tasks ──
   ipcMain.handle(CH.tasks.list, (_e, projectId: number | null) => tasksRepo.list(projectId))
@@ -93,6 +115,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     tasksRepo.setCompleted(id, completed)
   )
   ipcMain.handle(CH.tasks.reorder, (_e, ids: number[]) => tasksRepo.reorder(ids))
+  ipcMain.handle(CH.tasks.keepLocal, (_e, id: number) => tasksRepo.keepLocal(id))
   ipcMain.handle(CH.tasks.remove, (_e, id: number) => {
     tasksRepo.remove(id)
     // The running session points at a task that no longer exists; drop the reference
@@ -128,6 +151,12 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       if (ctx.timer.getState().status !== 'idle') {
         throw new Error('Stop the timer before importing — a running session would be written into the replaced data.')
       }
+      // An imported snapshot under a live sync token and outbox would diverge from Todoist
+      // in ways no later sync can reconcile. Disconnecting first makes the replace clean.
+      const state = ctx.todoist.status().health.state
+      if (state !== 'disconnected' && state !== 'unavailable') {
+        throw new Error('Disconnect Todoist before importing — the imported data would conflict with what is synced.')
+      }
     }
     assertIdle()
 
@@ -141,6 +170,34 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   // ── system ──
   ipcMain.handle(CH.system.getHotkeyFailures, () => getHotkeyFailures())
   ipcMain.handle(CH.system.probeHotkey, (_e, accelerator: string) => probeHotkey(accelerator))
+  ipcMain.handle(CH.system.suspendHotkeys, (e, suspended: boolean) => {
+    setHotkeysSuspended(suspended)
+    if (!suspended) return
+    // A settings screen that reloads, crashes or closes mid-capture never sends the
+    // matching "resume", and the user would be left with dead hotkeys and no clue why.
+    const resume = (): void => setHotkeysSuspended(false)
+    e.sender.once('did-start-loading', resume)
+    e.sender.once('render-process-gone', resume)
+    e.sender.once('destroyed', resume)
+  })
+
+  // ── integrations ──
+  ipcMain.handle(CH.todoist.status, () => ctx.todoist.status())
+  ipcMain.handle(CH.todoist.connect, (_e, token: string) => ctx.todoist.connect(String(token)))
+  ipcMain.handle(CH.todoist.disconnect, () => ctx.todoist.disconnect())
+  ipcMain.handle(CH.todoist.syncNow, () => ctx.todoist.syncNow())
+
+  ipcMain.handle(CH.calendars.list, () => ctx.calendars.list())
+  ipcMain.handle(CH.calendars.add, (_e, feed: CalendarFeedCreate) => ctx.calendars.add(feed))
+  ipcMain.handle(CH.calendars.update, (_e, id: number, patch: CalendarFeedUpdate) =>
+    ctx.calendars.update(id, patch)
+  )
+  ipcMain.handle(CH.calendars.remove, (_e, id: number) => ctx.calendars.remove(id))
+  ipcMain.handle(CH.calendars.refreshNow, () => ctx.calendars.refreshNow())
+  ipcMain.handle(CH.calendars.secureStorageAvailable, () => ctx.calendars.secureStorageAvailable())
+  ipcMain.handle(CH.calendar.eventsRange, (_e, fromMs: number, toMs: number) =>
+    ctx.calendars.eventsRange(fromMs, toMs)
+  )
 
   // ── stats ──
   ipcMain.handle(CH.stats.summary, (_e, range: StatsRange) => statsRepo.summary(range))

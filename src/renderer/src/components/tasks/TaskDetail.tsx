@@ -14,8 +14,9 @@
 
 import { useEffect, useState } from 'react'
 import type { Priority, TaskWithStats } from '@shared/types'
+import { todoistTaskUrl } from '@shared/types'
 import { Button, IconButton } from '@renderer/components/timer/Button'
-import { TargetIcon, XIcon } from '@renderer/components/timer/icons'
+import { TargetIcon, WarningIcon, XIcon } from '@renderer/components/timer/icons'
 import {
   PRIORITY_LABEL,
   PRIORITY_VAR,
@@ -23,9 +24,14 @@ import {
   toLocalDateKey
 } from '@renderer/lib/format'
 import { useTasksStore } from '@renderer/stores/tasks'
-import { ClockIcon, TrashIcon } from './icons'
+import { ClockIcon, ExternalLinkIcon, RepeatIcon, TodoistIcon, TrashIcon } from './icons'
 import { SubtaskList } from './SubtaskList'
 import { FIELD, InlineConfirm, SectionLabel } from './ui'
+
+/** An externally-created row carries a placeholder id until its first push upstream. */
+function isUnsyncedPlaceholder(externalId: string | null): boolean {
+  return externalId !== null && externalId.startsWith('tmp:')
+}
 
 const PRIORITIES: Priority[] = [1, 2, 3, 4]
 
@@ -67,6 +73,7 @@ export function TaskDetail(): React.JSX.Element | null {
   const selectTask = useTasksStore((s) => s.selectTask)
   const updateTask = useTasksStore((s) => s.updateTask)
   const deleteTask = useTasksStore((s) => s.deleteTask)
+  const keepLocalTask = useTasksStore((s) => s.keepLocalTask)
   const setTaskCompleted = useTasksStore((s) => s.setTaskCompleted)
   const setFocusTask = useTasksStore((s) => s.setFocusTask)
 
@@ -100,6 +107,15 @@ export function TaskDetail(): React.JSX.Element | null {
   const project = projects.find((p) => p.id === task.projectId)
   const isFocused = focusTaskId === task.id
   const completed = task.completedAt !== null
+  const synced = task.source === 'todoist'
+  const deletedUpstream = task.remoteDeletedAt !== null
+  const notSyncedYet = synced && (task.externalId === null || isUnsyncedPlaceholder(task.externalId))
+  // Same-source moves only: a synced task can only land in another Todoist project (main
+  // pushes the move upstream), but a local task may move INTO a synced project — it just
+  // starts syncing from there.
+  const moveTargets = projects.filter(
+    (p) => p.id !== task.projectId && (!synced || p.source === task.source)
+  )
 
   function commitTitle(): void {
     const next = title.trim()
@@ -167,6 +183,22 @@ export function TaskDetail(): React.JSX.Element | null {
             Done
           </span>
         ) : null}
+        {synced ? (
+          <span
+            className="shrink-0 text-[var(--color-text-muted)]"
+            title="Synced from Todoist"
+          >
+            <TodoistIcon />
+          </span>
+        ) : null}
+        {task.recurring ? (
+          <span
+            className="shrink-0 text-[var(--color-text-muted)]"
+            title="Recurring — completing it advances to the next occurrence instead of closing it for good"
+          >
+            <RepeatIcon className="h-3.5 w-3.5" />
+          </span>
+        ) : null}
         <IconButton
           variant="ghost"
           aria-label="Close details"
@@ -195,25 +227,96 @@ export function TaskDetail(): React.JSX.Element | null {
           className={`${FIELD} resize-none text-[14px] font-medium leading-5`}
         />
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Button
-            size="sm"
-            variant={isFocused ? 'primary' : 'secondary'}
-            accent="var(--color-focus)"
-            icon={<TargetIcon className="h-3.5 w-3.5" />}
-            onClick={() => void setFocusTask(isFocused ? null : task.id)}
-            title="Point the timer at this task"
-          >
-            {isFocused ? 'Timing this' : 'Time this'}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void setTaskCompleted(task.id, !completed)}
-          >
-            {completed ? 'Reopen' : 'Complete'}
-          </Button>
-        </div>
+        {deletedUpstream ? (
+          <div className="rounded-md border border-[var(--color-danger)]/45 bg-[color-mix(in_srgb,var(--color-danger)_9%,var(--color-surface-raised))] p-2.5">
+            <p className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--color-danger)]">
+              <WarningIcon className="h-3.5 w-3.5 shrink-0" />
+              Deleted in Todoist
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              This task no longer exists upstream. Keep it here as a local task, or delete it —
+              either way, the focus time already logged against it stays in your stats.
+            </p>
+            <div className="mt-2 flex gap-1.5">
+              <Button size="sm" variant="secondary" onClick={() => void keepLocalTask(task.id)}>
+                Keep as local task
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon={<TrashIcon />}
+                onClick={() => void deleteTask(task.id)}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              size="sm"
+              variant={isFocused ? 'primary' : 'secondary'}
+              accent="var(--color-focus)"
+              icon={<TargetIcon className="h-3.5 w-3.5" />}
+              onClick={() => void setFocusTask(isFocused ? null : task.id)}
+              title="Point the timer at this task"
+            >
+              {isFocused ? 'Timing this' : 'Time this'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              title={
+                !completed && task.recurring
+                  ? 'Advances to the next occurrence rather than closing it for good'
+                  : undefined
+              }
+              onClick={() => void setTaskCompleted(task.id, !completed)}
+            >
+              {completed ? 'Reopen' : task.recurring ? 'Complete (advances)' : 'Complete'}
+            </Button>
+          </div>
+        )}
+
+        {synced ? (
+          <p className="text-[11px] text-[var(--color-text-muted)]">
+            {notSyncedYet ? (
+              'Not synced yet — this will push to Todoist on the next sync.'
+            ) : (
+              <button
+                type="button"
+                onClick={() => window.open(todoistTaskUrl(task.externalId as string))}
+                className="inline-flex items-center gap-1 text-[var(--color-text)] outline-none hover:underline focus-visible:underline"
+              >
+                <ExternalLinkIcon className="h-3 w-3" />
+                Open in Todoist
+              </button>
+            )}
+          </p>
+        ) : null}
+
+        {moveTargets.length > 0 ? (
+          <Field label="Project">
+            <select
+              value={task.projectId}
+              aria-label="Move to project"
+              onChange={(e) => void updateTask(task.id, { projectId: Number(e.target.value) })}
+              className={FIELD}
+            >
+              {project ? <option value={project.id}>{project.name}</option> : null}
+              {moveTargets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            {!synced && moveTargets.some((p) => p.source === 'todoist') ? (
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                Moving this into a Todoist project pushes it there and it starts syncing.
+              </p>
+            ) : null}
+          </Field>
+        ) : null}
 
         <Field label="Priority">
           <div className="grid grid-cols-4 gap-1">
@@ -362,41 +465,58 @@ export function TaskDetail(): React.JSX.Element | null {
         <SubtaskList taskId={task.id} done={task.subtaskDone} total={task.subtaskTotal} />
       </div>
 
-      <footer className="border-t border-[var(--color-border)] p-2.5">
-        {confirming ? (
-          <InlineConfirm
-            confirmLabel="Delete task"
-            onCancel={() => setConfirming(false)}
-            onConfirm={() => {
-              setConfirming(false)
-              void deleteTask(task.id)
-            }}
-            message={
-              <>
-                Delete <strong className="font-semibold">{task.title}</strong>
-                {task.subtaskTotal > 0 ? (
+      {deletedUpstream ? null : (
+        <footer className="border-t border-[var(--color-border)] p-2.5">
+          {confirming ? (
+            <InlineConfirm
+              confirmLabel="Delete task"
+              onCancel={() => setConfirming(false)}
+              onConfirm={() => {
+                setConfirming(false)
+                void deleteTask(task.id)
+              }}
+              message={
+                synced ? (
                   <>
-                    {' '}
-                    and its <span className="tabular">{task.subtaskTotal}</span> subtask
-                    {task.subtaskTotal === 1 ? '' : 's'}
+                    Delete <strong className="font-semibold">{task.title}</strong>
+                    {task.subtaskTotal > 0 ? (
+                      <>
+                        {' '}
+                        and its <span className="tabular">{task.subtaskTotal}</span> subtask
+                        {task.subtaskTotal === 1 ? '' : 's'}
+                      </>
+                    ) : null}
+                    ? This also deletes it in Todoist. Focus time you already logged stays in
+                    your stats. This cannot be undone.
                   </>
-                ) : null}
-                ? Focus time you already logged stays in your stats. This cannot be undone.
-              </>
-            }
-          />
-        ) : (
-          <Button
-            variant="danger"
-            size="sm"
-            className="w-full"
-            icon={<TrashIcon />}
-            onClick={() => setConfirming(true)}
-          >
-            Delete task
-          </Button>
-        )}
-      </footer>
+                ) : (
+                  <>
+                    Delete <strong className="font-semibold">{task.title}</strong>
+                    {task.subtaskTotal > 0 ? (
+                      <>
+                        {' '}
+                        and its <span className="tabular">{task.subtaskTotal}</span> subtask
+                        {task.subtaskTotal === 1 ? '' : 's'}
+                      </>
+                    ) : null}
+                    ? Focus time you already logged stays in your stats. This cannot be undone.
+                  </>
+                )
+              }
+            />
+          ) : (
+            <Button
+              variant="danger"
+              size="sm"
+              className="w-full"
+              icon={<TrashIcon />}
+              onClick={() => setConfirming(true)}
+            >
+              Delete task
+            </Button>
+          )}
+        </footer>
+      )}
     </aside>
   )
 }

@@ -17,6 +17,8 @@ import * as sessionsRepo from './db/repo/sessions'
 import * as tasksRepo from './db/repo/tasks'
 import { createTimerService, type TimerService } from './timer'
 import { registerIpcHandlers } from './ipc'
+import { createTodoistIntegration, type TodoistIntegration } from './integrations/todoist'
+import { createCalendarIntegration, type CalendarIntegration } from './integrations/ical'
 import { destroyTray, initTray, updateTray } from './tray'
 import { disposeNotifications, initNotifications, notifyPhaseEnd } from './notifications'
 import { initHotkeys, reregisterHotkeys, unregisterHotkeys } from './hotkeys'
@@ -41,6 +43,8 @@ import {
  */
 let settings: Settings
 let timer: TimerService
+let todoist: TodoistIntegration | null = null
+let calendars: CalendarIntegration | null = null
 
 /** Tray tooltips only need second resolution; the timer ticks four times faster. */
 let lastTrayUpdateMs = 0
@@ -78,11 +82,23 @@ if (!gotLock) {
         taskId == null ? null : (tasksRepo.get(taskId)?.projectId ?? null)
     })
 
+    // Network lives only here in main; the renderer learns about it through status and
+    // data-changed events and never fetches anything itself.
+    todoist = createTodoistIntegration({
+      onStatus: (status) => broadcast(EV.todoistStatus, status),
+      onDataChanged: (scope) => broadcast(EV.dataChanged, scope)
+    })
+    calendars = createCalendarIntegration({
+      onDataChanged: (scope) => broadcast(EV.dataChanged, scope)
+    })
+
     registerIpcHandlers({
       timer,
       getSettings: () => settings,
       applySettingsPatch,
-      reloadAfterImport
+      reloadAfterImport,
+      todoist,
+      calendars
     })
 
     initNotifications({ getSettings: () => settings })
@@ -118,6 +134,15 @@ if (!gotLock) {
     })
     if (settings.showMiniWidget) setMiniWidget(true)
 
+    // Started after the window exists so the first status broadcast has somewhere to land.
+    // Both are no-ops until an account or feed is connected.
+    todoist.start()
+    calendars.start()
+
+    // Coming back to the app is when stale tasks are most noticeable; nudge() syncs only if
+    // the last cycle is more than a minute old, so alt-tabbing does not hammer the API.
+    app.on('browser-window-focus', () => todoist?.nudge())
+
     // Paint the tray with the real initial state rather than leaving it blank until the
     // first tick — which, when idle, never comes.
     updateTray(timer.getState())
@@ -150,6 +175,8 @@ if (!gotLock) {
       const win = getMainWindow()
       if (win && !win.isMinimized()) settingsRepo.setWindowBounds(win.getNormalBounds())
     }
+    todoist?.stop()
+    calendars?.stop()
     timer?.dispose()
     destroyTray()
     unregisterHotkeys()

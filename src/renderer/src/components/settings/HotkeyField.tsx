@@ -43,6 +43,25 @@ export function HotkeyField({
   const [live, setLive] = useState<LiveResult>(null)
   const probeToken = useRef(0)
 
+  // The app's own global shortcuts would otherwise fire while a combination is being
+  // recorded (e.g. pressing the skip combo would skip the timer instead of being captured).
+  // Guarded because the handler may not exist yet until main wiring lands, and because main
+  // also restores registrations on window reload/close, so unmount cleanup is all this needs
+  // beyond every path that ends recording.
+  function setHotkeysSuspended(suspended: boolean): void {
+    try {
+      void window.flowdo?.system?.suspendHotkeys(suspended)?.catch(() => {})
+    } catch {
+      // No-op: suspendHotkeys may not exist yet, or the bridge may be unavailable.
+    }
+  }
+
+  useEffect(() => {
+    if (!recording) return
+    setHotkeysSuspended(true)
+    return () => setHotkeysSuspended(false)
+  }, [recording])
+
   useEffect(() => {
     if (!recording) return
 

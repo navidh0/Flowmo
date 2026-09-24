@@ -186,6 +186,68 @@ export function StackIcon({ className = 'h-4 w-4' }: IconProps): React.JSX.Eleme
   )
 }
 
+/**
+ * Rounded check-mark badge — the source marker for anything synced from Todoist. Deliberately
+ * not the Todoist wordmark/logo, just a small "this came from somewhere else" glyph.
+ */
+export function TodoistIcon({ className = 'h-3 w-3' }: IconProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.2" y="2.2" width="11.6" height="11.6" rx="3.2" />
+      <path d="M5 8.1l1.9 1.9L11 6" />
+    </svg>
+  )
+}
+
+/** Two curved arrows chasing each other — a recurring task, or "advance to next occurrence". */
+export function RepeatIcon({ className = 'h-3.5 w-3.5' }: IconProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3.1 7.3V5.6a2.5 2.5 0 0 1 2.5-2.5h6.7" />
+      <path d="M10.4 1.4l1.9 1.7-1.9 1.7" />
+      <path d="M12.9 8.7v1.7a2.5 2.5 0 0 1-2.5 2.5H3.7" />
+      <path d="M5.6 14.6l-1.9-1.7 1.9-1.7" />
+    </svg>
+  )
+}
+
+/** Arrow breaking out of a box — "open this elsewhere", used for "Open in Todoist". */
+export function ExternalLinkIcon({ className = 'h-3.5 w-3.5' }: IconProps): React.JSX.Element {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6.6 3.2H3.6a1 1 0 0 0-1 1v8.2a1 1 0 0 0 1 1h8.2a1 1 0 0 0 1-1v-3" />
+      <path d="M9.2 2.4h4.4v4.4M13.4 2.6L7.6 8.4" />
+    </svg>
+  )
+}
+
 /** An empty list, for the "no tasks yet" state. */
 export function EmptyListIcon({ className = 'h-8 w-8' }: IconProps): React.JSX.Element {
   return (

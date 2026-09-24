@@ -4,7 +4,7 @@
  * a rail only costs width, which the resizable columns already trade in.
  */
 
-export type Screen = 'focus' | 'stats' | 'settings'
+export type Screen = 'focus' | 'day' | 'stats' | 'settings'
 
 export interface NavBarProps {
   current: Screen
@@ -13,6 +13,7 @@ export interface NavBarProps {
 
 const ITEMS: { screen: Screen; label: string; icon: (className: string) => React.JSX.Element }[] = [
   { screen: 'focus', label: 'Focus', icon: (c) => <FocusIcon className={c} /> },
+  { screen: 'day', label: 'Day', icon: (c) => <DayIcon className={c} /> },
   { screen: 'stats', label: 'Stats', icon: (c) => <StatsIcon className={c} /> },
   { screen: 'settings', label: 'Settings', icon: (c) => <SettingsIcon className={c} /> }
 ]
@@ -58,6 +59,15 @@ function FocusIcon({ className }: IconProps): React.JSX.Element {
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
       <circle cx="10" cy="10" r="7" />
       <circle cx="10" cy="10" r="2.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function DayIcon({ className }: IconProps): React.JSX.Element {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="13" height="12" rx="2" />
+      <path d="M7 3v3M13 3v3M3.5 8.5h13M7 12h3.5" />
     </svg>
   )
 }

@@ -12,7 +12,7 @@ import { IconButton } from '@renderer/components/timer/Button'
 import { XIcon } from '@renderer/components/timer/icons'
 import { useTasksStore } from '@renderer/stores/tasks'
 import { useTasksBootstrap } from './bootstrap'
-import { CheckIcon, PencilIcon, PlusIcon, StackIcon, TrashIcon } from './icons'
+import { CheckIcon, PencilIcon, PlusIcon, StackIcon, TodoistIcon, TrashIcon } from './icons'
 import { FIELD, HOVER_ACTION, InlineConfirm, SectionLabel } from './ui'
 
 /** Matches the palette main cycles through, so the swatches are the colours it can assign. */
@@ -126,6 +126,9 @@ export function ProjectSidebar(): React.JSX.Element {
         {projects.map((project) => {
           const active = selectedProjectId === project.id
           const editing = editingId === project.id
+          // Synced projects are pull-only: Flowdo mirrors them but never renames, archives
+          // or deletes them upstream, so those actions are not offered at all here.
+          const synced = project.source === 'todoist'
 
           if (editing) {
             return (
@@ -192,43 +195,53 @@ export function ProjectSidebar(): React.JSX.Element {
                     style={{ backgroundColor: project.color }}
                   />
                   <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  {synced ? (
+                    <span
+                      className="shrink-0 text-[var(--color-text-muted)]"
+                      title="Synced from Todoist — pulled in, never renamed, archived or deleted from here"
+                    >
+                      <TodoistIcon />
+                    </span>
+                  ) : null}
                 </button>
 
-                <div className={`flex shrink-0 items-center gap-0.5 ${HOVER_ACTION}`}>
-                  <IconButton
-                    variant="ghost"
-                    aria-label={`Rename ${project.name}`}
-                    title="Rename"
-                    className="h-6 w-6"
-                    onClick={() => {
-                      closeEditors()
-                      setEditName(project.name)
-                      setEditingId(project.id)
-                    }}
-                  >
-                    <PencilIcon />
-                  </IconButton>
-                  <IconButton
-                    variant="danger"
-                    aria-label={`Delete ${project.name}`}
-                    title="Delete"
-                    className="h-6 w-6"
-                    onClick={() => {
-                      closeEditors()
-                      setConfirmingId(project.id)
-                    }}
-                  >
-                    <TrashIcon />
-                  </IconButton>
-                </div>
+                {synced ? null : (
+                  <div className={`flex shrink-0 items-center gap-0.5 ${HOVER_ACTION}`}>
+                    <IconButton
+                      variant="ghost"
+                      aria-label={`Rename ${project.name}`}
+                      title="Rename"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        closeEditors()
+                        setEditName(project.name)
+                        setEditingId(project.id)
+                      }}
+                    >
+                      <PencilIcon />
+                    </IconButton>
+                    <IconButton
+                      variant="danger"
+                      aria-label={`Delete ${project.name}`}
+                      title="Delete"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        closeEditors()
+                        setConfirmingId(project.id)
+                      }}
+                    >
+                      <TrashIcon />
+                    </IconButton>
+                  </div>
+                )}
 
                 {/* Sits under the hover actions so the count does not fight them for the slot. */}
-                <span className="group-hover:hidden group-focus-within:hidden">
+                <span className={synced ? '' : 'group-hover:hidden group-focus-within:hidden'}>
                   <Badge count={openCounts[project.id] ?? 0} active={active} />
                 </span>
               </div>
 
-              {confirmingId === project.id ? (
+              {confirmingId === project.id && !synced ? (
                 <div className="px-1 py-1.5">
                   <InlineConfirm
                     confirmLabel="Delete project"

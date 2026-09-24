@@ -39,6 +39,13 @@ let deps: HotkeyDeps | null = null
 let registered: string[] = []
 let failures: HotkeyFailure[] = []
 
+/**
+ * True while the settings screen is recording a new combination. Registrations are
+ * dropped for the duration so the live shortcuts cannot fire underneath the capture —
+ * pressing the skip combination while rebinding start/pause would otherwise skip the timer.
+ */
+let suspended = false
+
 export function initHotkeys(injected: HotkeyDeps): HotkeyFailure[] {
   deps = injected
   return reregisterHotkeys(injected.getSettings())
@@ -49,6 +56,9 @@ export function reregisterHotkeys(settings: Settings): HotkeyFailure[] {
   unregisterHotkeys()
   const d = deps
   if (!d) return []
+
+  // Saving a new binding while suspended lands here; it is applied on resume instead.
+  if (suspended) return []
 
   // Report rather than attempt: on Wayland registration reports success and then never
   // fires, so trying and trusting the result would tell the user their hotkey works.
@@ -97,6 +107,21 @@ export function unregisterHotkeys(): void {
   }
   registered = []
   failures = []
+}
+
+/**
+ * Suspend (true) or restore (false) the app's own global shortcuts. Idempotent. Restoring
+ * re-registers from the CURRENT settings, so a binding saved during the capture takes
+ * effect here rather than the one that was live when recording began.
+ */
+export function setHotkeysSuspended(value: boolean): void {
+  if (value === suspended) return
+  suspended = value
+  if (value) {
+    unregisterHotkeys()
+  } else if (deps) {
+    reregisterHotkeys(deps.getSettings())
+  }
 }
 
 /** The failures from the most recent pass — for the settings UI and for diagnostics. */

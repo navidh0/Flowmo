@@ -118,6 +118,12 @@ export interface TasksActions {
   updateTask: (id: number, patch: TaskUpdate) => Promise<void>
   setTaskCompleted: (id: number, completed: boolean) => Promise<void>
   deleteTask: (id: number) => Promise<void>
+  /**
+   * Detach a task deleted upstream so it survives locally instead. The main-process side of
+   * sync has not landed yet, so this currently rejects — that surfaces through the usual
+   * error banner and resync, same as any other failed mutation, rather than silently.
+   */
+  keepLocalTask: (id: number) => Promise<void>
   /** `ids` in their new order; applied optimistically and rolled back on failure. */
   reorderTasks: (ids: number[]) => Promise<void>
 
@@ -225,6 +231,20 @@ export const useTasksStore = create<TasksStore>((set, get) => {
           if (event.kind === 'focus') {
             void get().refreshTasks()
             void get().refreshCompleted()
+          }
+        })
+      )
+      // A sync pull changes rows out from under the renderer. Re-read rather than patch, for
+      // the same reason every mutation above does: TaskWithStats carries server-derived
+      // counts a local patch would guess at. refreshProjects/refreshTasks/refreshSubtasks
+      // already keep the current selection when the selected row is still there.
+      unsubscribers.push(
+        bridge.events.onDataChanged((scope) => {
+          if (scope === 'projects') void get().refreshProjects()
+          if (scope === 'tasks') {
+            void get().refreshTasks()
+            void get().refreshCompleted()
+            void get().refreshSubtasks()
           }
         })
       )
@@ -385,6 +405,13 @@ export const useTasksStore = create<TasksStore>((set, get) => {
       if (get().selectedTaskId === id) set({ selectedTaskId: null, subtasks: [] })
       await get().refreshTasks()
       await get().refreshCompleted()
+    },
+
+    async keepLocalTask(id) {
+      if (!(await attempt((bridge) => bridge.tasks.keepLocal(id)))) return
+      await get().refreshTasks()
+      await get().refreshCompleted()
+      if (get().selectedTaskId === id) await get().refreshSubtasks()
     },
 
     async reorderTasks(ids) {

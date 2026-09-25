@@ -165,3 +165,58 @@ export function makeReporter(suiteName) {
     results
   }
 }
+
+/**
+ * A genuine OS mouse click (Windows only) at the centre of `selector` in the mini widget.
+ *
+ * Playwright's page.click() goes through Chromium's input layer, which skips the window
+ * manager's hit test. A frameless window's drag regions and resize borders live in that hit
+ * test, so a control can pass page.click() and still never receive a real user's click.
+ * That's how the widget's close button shipped broken in 0.4.2. This moves the real cursor
+ * with user32 SetCursorPos and presses the button with mouse_event, from a DPI-aware
+ * PowerShell, in physical pixels.
+ *
+ * Returns false when the element isn't there; the caller decides what a missed click means.
+ */
+export async function osClickInMini(app, selector) {
+  const page = getMiniPage(app)
+  if (!page) return false
+  const rect = await page.evaluate((sel) => {
+    const el = document.querySelector(sel)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  }, selector)
+  if (!rect) return false
+  const origin = await app.evaluate(({ BrowserWindow, screen }) => {
+    const w = BrowserWindow.getAllWindows()
+      .filter((x) => !x.isDestroyed() && !x.webContents.isDestroyed())
+      .find((x) => x.webContents.getURL().includes('mini'))
+    if (!w) return null
+    const b = w.getContentBounds()
+    return { x: b.x, y: b.y, scale: screen.getDisplayMatching(b).scaleFactor, zoom: w.webContents.getZoomFactor() }
+  })
+  if (!origin) return false
+  const px = Math.round((origin.x + rect.x * origin.zoom) * origin.scale)
+  const py = Math.round((origin.y + rect.y * origin.zoom) * origin.scale)
+  const script = `
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class FlowdoMouse {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
+}
+"@
+[FlowdoMouse]::SetProcessDPIAware() | Out-Null
+[FlowdoMouse]::SetCursorPos(${px}, ${py}) | Out-Null
+Start-Sleep -Milliseconds 200
+[FlowdoMouse]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+Start-Sleep -Milliseconds 80
+[FlowdoMouse]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+`
+  const { spawnSync } = await import('node:child_process')
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' })
+  if (r.status !== 0) throw new Error(`powershell click failed: ${r.stderr || r.stdout}`)
+  return true
+}

@@ -15,7 +15,8 @@ import {
   onMain,
   outDir,
   sleep,
-  waitFor
+  waitFor,
+  osClickInMini
 } from '../lib/harness.mjs'
 import { join } from 'node:path'
 
@@ -92,6 +93,31 @@ export async function run(ctx = {}) {
     }
     await onMain(app, 'w.show()')
     await sleep(400)
+
+    // ── Real OS clicks (Windows): what a user's mouse actually reaches ────────
+    // page.click() above skips the window manager's hit test; this doesn't. Play is the
+    // control: if a real click can't even start the timer, this runner doesn't deliver OS
+    // input and the check is skipped rather than guessed at.
+    if (process.platform === 'win32') {
+      await onMain(app, 'w.close()')
+      await waitFor(() => getMini(app))
+      await sleep(600)
+      await osClickInMini(app, '[aria-label="Start"]')
+      const started = await waitFor(async () => (await page.evaluate(() => window.flowdo.timer.getState())).status === 'running', 3000)
+      if (!started) {
+        skip('a real OS click on the × closes the widget', 'OS mouse input is not delivered on this runner (the Play control click did nothing)')
+      } else {
+        check('a real OS click reaches the widget (Play starts the timer)', true)
+        await page.evaluate(() => window.flowdo.timer.stop(true))
+        await sleep(300)
+        await osClickInMini(app, '[aria-label="Close widget"]')
+        check('a real OS click on the × closes the widget', !!(await waitFor(async () => (await getMini(app)) === null, 3000)))
+      }
+      await onMain(app, 'w.show()')
+      await sleep(400)
+    } else {
+      skip('real OS clicks on the widget', 'Windows only: needs user32 input injection')
+    }
 
     // ── Dragged position persists across a restart ────────────────────────────
     await onMain(app, 'w.close()')

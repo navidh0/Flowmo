@@ -135,7 +135,11 @@ itself once that gate passes. v0.4 finished the job.
   earned-break card and switch-mode confirmation fit inside the panel.
 - **Electron 44**.
 
-Released 2026-09-26.
+Released 2026-09-25.
+
+### v0.5.1 — the taskbar icon, properly this time
+
+- Windows taskbar, Start menu and shortcuts show the Flowdo icon: the exe's icon now has bitmap images at small sizes.
 
 ## Next
 

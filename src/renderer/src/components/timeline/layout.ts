@@ -9,6 +9,9 @@
  * 22:30 local session under tomorrow.
  */
 
+import { DEFAULT_SETTINGS } from '@shared/types'
+import type { Weekday } from '@shared/types'
+
 const HOUR_MS = 3_600_000
 
 export interface DayBounds {
@@ -147,22 +150,19 @@ export function layoutOverlaps<T extends OverlapInterval>(items: T[]): OverlapPl
 // Week and month ranges
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** JS `Date#getDay()` for the week's first day: 1 = Monday. The single constant so "which
- *  day starts the week" is never hard-coded a second way somewhere else. */
-export const WEEK_STARTS_ON = 1
-
-/** 0 for the week's first day (Monday), 6 for its last (Sunday), regardless of
+/** 0 for the week's first day (per `weekStartsOn`), 6 for its last, regardless of
  *  `Date#getDay()`'s Sunday-first numbering. */
-function weekdayIndex(d: Date): number {
-  return (d.getDay() - WEEK_STARTS_ON + 7) % 7
+function weekdayIndex(d: Date, weekStartsOn: Weekday): number {
+  return (d.getDay() - weekStartsOn + 7) % 7
 }
 
-/** The Monday-first local week containing `ms`, as `[Monday 00:00, next Monday 00:00)`.
- *  Length is 7 real calendar days, but NOT necessarily 168 hours — a week straddling a DST
+/** The local week containing `ms`, starting on `weekStartsOn` (`Date#getDay()` numbering,
+ *  0 = Sunday — see `Settings.weekStartsOn`), as `[start 00:00, next start 00:00)`. Length
+ *  is 7 real calendar days, but NOT necessarily 168 hours — a week straddling a DST
  *  transition is 167 or 169 hours, exactly like a day is 23 or 25. */
-export function localWeekBounds(ms: number): DayBounds {
+export function localWeekBounds(ms: number, weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn): DayBounds {
   const day = localDayBounds(ms)
-  const start = shiftLocalDay(day.start, -weekdayIndex(new Date(day.start)))
+  const start = shiftLocalDay(day.start, -weekdayIndex(new Date(day.start), weekStartsOn))
   const end = shiftLocalDay(start, 7)
   return { start, end }
 }
@@ -172,9 +172,10 @@ export function shiftLocalWeek(ms: number, deltaWeeks: number): number {
   return shiftLocalDay(ms, deltaWeeks * 7)
 }
 
-/** Local midnight of each of the 7 days in the Monday-first week containing `ms`. */
-export function weekDays(ms: number): number[] {
-  const { start } = localWeekBounds(ms)
+/** Local midnight of each of the 7 days in the week containing `ms`, starting on
+ *  `weekStartsOn`. */
+export function weekDays(ms: number, weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn): number[] {
+  const { start } = localWeekBounds(ms, weekStartsOn)
   return Array.from({ length: 7 }, (_, i) => shiftLocalDay(start, i))
 }
 
@@ -195,19 +196,20 @@ export function shiftLocalMonth(ms: number, deltaMonths: number): number {
 export interface MonthGrid {
   /** Local midnight of the 1st of the shown month. */
   monthMs: number
-  /** Monday-first weeks (each 7 local-midnight day anchors) covering the whole month —
-   *  4 to 6 rows depending on the month's length and which weekday it starts on. Leading/
-   *  trailing entries belong to the adjacent month; `isInMonth` tells them apart. */
+  /** Weeks (each 7 local-midnight day anchors), starting on `weekStartsOn`, covering the
+   *  whole month — 4 to 6 rows depending on the month's length and which weekday it starts
+   *  on. Leading/trailing entries belong to the adjacent month; `isInMonth` tells them apart. */
   weeks: number[][]
 }
 
-/** The calendar-grid weeks covering the month containing `ms`, Monday-first, with enough
- *  leading/trailing days from adjacent months to fill whole weeks. */
-export function monthGrid(ms: number): MonthGrid {
+/** The calendar-grid weeks covering the month containing `ms`, starting each row on
+ *  `weekStartsOn`, with enough leading/trailing days from adjacent months to fill whole
+ *  weeks. */
+export function monthGrid(ms: number, weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn): MonthGrid {
   const monthMs = monthAnchor(ms)
   const firstOfMonth = new Date(monthMs)
   const daysInMonth = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() + 1, 0).getDate()
-  const leading = weekdayIndex(firstOfMonth)
+  const leading = weekdayIndex(firstOfMonth, weekStartsOn)
   const rows = Math.ceil((leading + daysInMonth) / 7)
 
   const gridStart = shiftLocalDay(monthMs, -leading)

@@ -1,7 +1,8 @@
 /**
- * The Week view: 7 Monday-first columns sharing one hour grid. Each column is its own local
- * day — its own `localDayBounds`/`hourMarks`, so a column can be 23, 24 or 25 hours long
- * exactly like the Day view, never assumed to be a uniform 24.
+ * The Week view: 7 columns, starting on `weekStartsOn` (`Settings.weekStartsOn`), sharing
+ * one hour grid. Each column is its own local day — its own `localDayBounds`/`hourMarks`,
+ * so a column can be 23, 24 or 25 hours long exactly like the Day view, never assumed to be
+ * a uniform 24.
  *
  * Columns have a readable minimum width; a panel narrower than 7 columns' worth scrolls
  * horizontally rather than squashing them (`MIN_COLUMN_PX` + `overflow-x-auto`, no `w-[…]`
@@ -9,7 +10,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CalendarEvent, Project, Session, TimerState } from '@shared/types'
+import type { CalendarEvent, Project, Session, TimerState, Weekday } from '@shared/types'
 import { toLocalDateKey } from '@renderer/lib/format'
 import { eventBlocks, runningBlock, sessionBlocks } from './blocks'
 import { formatColumnHeading, formatHourMark } from './format'
@@ -46,6 +47,7 @@ export interface WeekViewProps {
   feedColors: Map<number, string>
   projects: Project[]
   timerState: TimerState
+  weekStartsOn: Weekday
   onSelectDay: (dayMs: number) => void
 }
 
@@ -56,9 +58,10 @@ export function WeekView({
   feedColors,
   projects,
   timerState,
+  weekStartsOn,
   onSelectDay
 }: WeekViewProps): React.JSX.Element {
-  const days = useMemo(() => weekDays(anchorMs), [anchorMs])
+  const days = useMemo(() => weekDays(anchorMs, weekStartsOn), [anchorMs, weekStartsOn])
   const columnBounds = useMemo<DayBounds[]>(() => days.map((d) => localDayBounds(d)), [days])
   const maxRows = useMemo(
     () => Math.max(...columnBounds.map((b) => hourMarks(b).length)),

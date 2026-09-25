@@ -20,7 +20,7 @@
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import type { Project, TaskWithStats } from '@shared/types'
 import { Button } from '@renderer/components/timer/Button'
-import { formatDueDate } from '@renderer/lib/format'
+import { formatDueGroupLabel } from '@renderer/lib/format'
 import { useTasksStore } from '@renderer/stores/tasks'
 import { ChevronIcon, EmptyListIcon, PlusIcon } from './icons'
 import { TaskRow, type RowDrag } from './TaskRow'
@@ -318,7 +318,7 @@ export function TaskList(): React.JSX.Element {
               ) : null}
               {today.today.length > 0 ? (
                 <DueGroup
-                  label="Today"
+                  label={formatDueGroupLabel(todayKey) ?? 'Today'}
                   tasks={today.today}
                   todayKey={todayKey}
                   projects={projects}
@@ -335,7 +335,7 @@ export function TaskList(): React.JSX.Element {
             ? upcomingDays.map((day) => (
                 <DueGroup
                   key={day.dateKey}
-                  label={formatDueDate(day.dateKey) ?? day.dateKey}
+                  label={formatDueGroupLabel(day.dateKey) ?? day.dateKey}
                   tasks={day.tasks}
                   todayKey={todayKey}
                   projects={projects}

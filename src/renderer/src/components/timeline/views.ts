@@ -4,7 +4,8 @@
  * `tests/timeline-views.test.ts` with `process.env.TZ` pointed at a DST zone.
  */
 
-import type { CalendarEvent, Session } from '@shared/types'
+import { DEFAULT_SETTINGS } from '@shared/types'
+import type { CalendarEvent, Session, Weekday } from '@shared/types'
 // Relative, not `@renderer/lib/format` — the vitest config that runs this file's tests only
 // aliases `@shared`, and this module needs to import cleanly under both electron-vite (app)
 // and vitest (tests/timeline-views.test.ts).
@@ -38,11 +39,17 @@ export function isViewActive(option: ViewMode, current: ViewMode): boolean {
 
 /** The instants covered by what's currently on screen for `view`, anchored on `anchorMs`.
  *  Month's range is the full leading/trailing grid, matching what `monthGrid` renders and
- *  therefore what needs data fetched for it. */
-export function viewRangeBounds(view: ViewMode, anchorMs: number): DayBounds {
+ *  therefore what needs data fetched for it. `weekStartsOn` (`Settings.weekStartsOn`) picks
+ *  which weekday Week and Month's rows start on; it defaults to Monday for callers that
+ *  don't care (mostly tests). */
+export function viewRangeBounds(
+  view: ViewMode,
+  anchorMs: number,
+  weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn
+): DayBounds {
   if (view === 'day') return localDayBounds(anchorMs)
-  if (view === 'week') return localWeekBounds(anchorMs)
-  const grid = monthGrid(anchorMs)
+  if (view === 'week') return localWeekBounds(anchorMs, weekStartsOn)
+  const grid = monthGrid(anchorMs, weekStartsOn)
   const firstWeek = grid.weeks[0]
   const lastWeek = grid.weeks[grid.weeks.length - 1]
   const firstDay = firstWeek?.[0] ?? anchorMs
@@ -194,7 +201,12 @@ export function calendarWindowNote(
   if (range.start >= cache.start && range.end <= cache.end) return null
 
   const fmt = (ms: number): string =>
-    new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    new Date(ms).toLocaleDateString(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    })
   // `cache.end` is the exclusive start of the day after the window; the window's last
   // INCLUSIVE day reads one day earlier.
   const lastInclusive = shiftLocalDay(cache.end, -1)

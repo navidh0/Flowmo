@@ -1,15 +1,16 @@
 /**
- * The Month view: a Monday-first grid of weeks covering the month, with leading/trailing
- * days from adjacent months dimmed. Each cell shows the day number, that day's total focus
- * time, and event chips (all-day first, then timed by start time), truncated to what fits
- * with a "+N more" overflow. Clicking a day switches to Day view on that date.
+ * The Month view: a grid of weeks covering the month, starting on `weekStartsOn`
+ * (`Settings.weekStartsOn`), with leading/trailing days from adjacent months dimmed. Each
+ * cell shows the day number, that day's total focus time, and event chips (all-day first,
+ * then timed by start time), truncated to what fits with a "+N more" overflow. Clicking a
+ * day switches to Day view on that date.
  */
 
 import { useMemo } from 'react'
-import type { CalendarEvent, Project, Session } from '@shared/types'
+import type { CalendarEvent, Project, Session, Weekday } from '@shared/types'
 import { formatDuration, toLocalDateKey } from '@renderer/lib/format'
-import { formatClockTime, formatEventStart } from './format'
-import { isInMonth, localDayBounds, monthGrid, WEEK_STARTS_ON } from './layout'
+import { formatClockTime, formatDayHeading, formatEventStart } from './format'
+import { isInMonth, localDayBounds, monthGrid } from './layout'
 import {
   allDayEventsForDay,
   bucketSessionsByDay,
@@ -20,13 +21,20 @@ import {
 
 const MAX_CHIPS = 3
 
-/** Mon..Sun column headers, following the same `WEEK_STARTS_ON` constant the grid itself
- *  uses, so the labels can never drift out of sync with the columns underneath them. */
-const WEEKDAY_LABELS = Array.from({ length: 7 }, (_, i) =>
-  new Date(2026, 0, 5 + ((i + WEEK_STARTS_ON - 1) % 7)).toLocaleDateString(undefined, {
-    weekday: 'short'
+/** 4 Jan 2026 is a Sunday — the reference date the weekday header row is built from, so it
+ *  never depends on which month is actually showing. */
+const REFERENCE_SUNDAY = new Date(2026, 0, 4)
+
+/** Short weekday labels for the header row, starting on `weekStartsOn` — kept in step with
+ *  the grid itself, which is built from the same setting, so the labels can never drift out
+ *  of sync with the columns underneath them. */
+function weekdayLabels(weekStartsOn: Weekday): string[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(REFERENCE_SUNDAY)
+    d.setDate(d.getDate() + ((weekStartsOn + i) % 7))
+    return d.toLocaleDateString(undefined, { weekday: 'short' })
   })
-)
+}
 
 export interface MonthCellChip {
   key: string
@@ -45,6 +53,7 @@ export interface MonthViewProps {
   calendarEvents: CalendarEvent[]
   feedColors: Map<number, string>
   projects: Project[]
+  weekStartsOn: Weekday
   onSelectDay: (dayMs: number) => void
 }
 
@@ -53,17 +62,19 @@ export function MonthView({
   sessions,
   calendarEvents,
   feedColors,
+  weekStartsOn,
   onSelectDay
 }: MonthViewProps): React.JSX.Element {
-  const grid = useMemo(() => monthGrid(anchorMs), [anchorMs])
+  const grid = useMemo(() => monthGrid(anchorMs, weekStartsOn), [anchorMs, weekStartsOn])
   const sessionsByDay = useMemo(() => bucketSessionsByDay(sessions), [sessions])
   const today = useMemo(() => toLocalDateKey(Date.now()), [])
+  const labels = useMemo(() => weekdayLabels(weekStartsOn), [weekStartsOn])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
       <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
-        {WEEKDAY_LABELS.map((label) => (
-          <div key={label} className="px-1.5 py-1.5 text-center text-[11px] font-medium text-[var(--color-text-muted)]">
+        {labels.map((label, i) => (
+          <div key={`${label}-${i}`} className="px-1.5 py-1.5 text-center text-[11px] font-medium text-[var(--color-text-muted)]">
             {label}
           </div>
         ))}
@@ -107,7 +118,8 @@ export function MonthView({
               key={dayMs}
               type="button"
               onClick={() => onSelectDay(dayMs)}
-              aria-label={`Open ${new Date(dayMs).toLocaleDateString()} in Day view`}
+              aria-label={`Open ${formatDayHeading(dayMs)} in Day view`}
+              title={formatDayHeading(dayMs)}
               className={`flex min-w-0 flex-col items-stretch gap-1 border-b border-r border-[var(--color-border)]/60 p-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40 ${
                 inMonth ? '' : 'opacity-40'
               }`}

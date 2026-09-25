@@ -71,6 +71,29 @@ export function formatDueDate(dateKey: string | null, now = Date.now()): string 
   })
 }
 
+/**
+ * Like `formatDueDate`, but Today/Tomorrow/Yesterday get the weekday and date appended —
+ * `Today · Fri 25 Sep` — for the Today and Upcoming group headers, where the bare relative
+ * word alone leaves the actual date unstated. Every other date is exactly
+ * `formatDueDate`'s output, unchanged, so a row's own "Today" chip never disagrees with the
+ * group heading it sits under.
+ */
+export function formatDueGroupLabel(dateKey: string | null, now = Date.now()): string | null {
+  const relative = formatDueDate(dateKey, now)
+  if (relative === null || dateKey === null) return relative
+  if (relative !== 'Today' && relative !== 'Tomorrow' && relative !== 'Yesterday') return relative
+
+  const [y, m, d] = dateKey.split('-').map(Number)
+  if (!y || !m || !d) return relative
+  const due = new Date(y, m - 1, d)
+  const dateLabel = due.toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short'
+  })
+  return `${relative} · ${dateLabel}`
+}
+
 export const PRIORITY_LABEL: Record<1 | 2 | 3 | 4, string> = {
   1: 'Urgent',
   2: 'High',

@@ -83,15 +83,20 @@ export function formatColumnHeading(dayMs: number): string {
   return new Date(dayMs).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })
 }
 
-/** `1 – 7 June 2026`, or `29 Jun – 5 Jul 2026` when the week crosses a month, for the Week
- *  header. `weekStartMs`/`weekEndMs` are the week's bounds (`end` exclusive). */
+/** The Week header, with both ends' weekday names: `Mon, 1 Jun – Sun, 7 Jun 2026` in en-GB,
+ *  `Mon, Jun 1 – Sun, Jun 7, 2026` in en-US. `Intl.DateTimeFormat#formatRange` collapses the
+ *  shared month/year and orders the parts the way the user's locale expects — assembling
+ *  the two ends separately put the weekday after the day in en-US ("1 Mon – …"). A week
+ *  that crosses a month or a year keeps both ends' month or year. `weekStartMs`/`weekEndMs`
+ *  are the week's bounds (`end` exclusive). */
 export function formatWeekHeading(weekStartMs: number, weekEndMs: number): string {
-  const start = new Date(weekStartMs)
-  const end = new Date(weekEndMs - 1) // last INCLUSIVE day of the week
-  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()
-  const startLabel = start.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'short' })
-  const endLabel = end.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  return `${startLabel} – ${endLabel}`
+  const lastInclusive = weekEndMs - 1 // any instant in the week's last day
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  }).formatRange(weekStartMs, lastInclusive)
 }
 
 /** `June 2026` for the Month header. */

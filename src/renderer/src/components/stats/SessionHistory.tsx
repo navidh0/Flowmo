@@ -24,7 +24,7 @@ function formatWhen(ms: number): string {
     d.getDate() === now.getDate()
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
   if (sameDay) return time
-  return `${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}, ${time}`
+  return `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}, ${time}`
 }
 
 export interface SessionHistoryProps {

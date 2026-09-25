@@ -7,7 +7,8 @@
  * skeleton rather than `NaN`-filled cards.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { useTimerStore } from '@renderer/stores/timer'
 import { useStatsStore } from '@renderer/stores/stats'
 import { Button } from '@renderer/components/timer/Button'
 import { DailyChart } from './DailyChart'
@@ -49,6 +50,20 @@ export function StatsPage(): React.JSX.Element {
     return () => dispose()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // "This week" is computed by main from settings.weekStartsOn — when the user changes it
+  // while this screen is open, the range the summary/daily/history already show is stale.
+  // Skip the first run so mounting doesn't double the initial `init()` fetch above.
+  const weekStartsOn = useTimerStore((s) => s.settings.weekStartsOn)
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      return
+    }
+    void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStartsOn])
 
   const isEmpty = summary !== null && summary.focusSessions === 0 && byProject.length === 0
 

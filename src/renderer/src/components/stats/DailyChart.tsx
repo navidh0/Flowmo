@@ -3,9 +3,12 @@
  * this component renders exactly what it receives and neither drops empty days nor
  * synthesises its own gaps.
  *
- * `DailyBucket.date` is a local 'YYYY-MM-DD' string. It is formatted for the axis by
- * slicing, never by round-tripping through `new Date(dateKey).toISOString()`, which reads
- * the key as UTC and can shift the label a day.
+ * `DailyBucket.date` is a local 'YYYY-MM-DD' string. The compact axis label (`shortLabel`) is
+ * formatted by slicing, with no `Date` at all; the weekday label (`weekdayLabel`, used for the
+ * tooltip always and the axis on a 7-day range) does need a `Date` to name the day, so it
+ * builds one from the key's own y/m/d fields via `new Date(y, m - 1, d)`. Neither ever goes
+ * through `new Date(dateKey)` or `.toISOString()`, which reads the key as UTC and can shift
+ * the label a day.
  */
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -33,6 +36,21 @@ function shortLabel(dateKey: string): string {
   return `${Number(d)} ${months[monthIndex] ?? ''}`
 }
 
+/**
+ * 'YYYY-MM-DD' -> 'Thu 24 Sep'. Unlike `shortLabel`, this one does need a real `Date` to name
+ * the weekday — built from the key's own y/m/d fields via `new Date(y, m - 1, d)` (local
+ * midnight), never `new Date(dateKey)` or `.toISOString()`, either of which reads the key as
+ * UTC and can name the day before or after the one the key actually means.
+ */
+function weekdayLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short'
+  })
+}
+
 interface TooltipPayload {
   active?: boolean
   payload?: Array<{ payload: DailyBucket }>
@@ -44,7 +62,7 @@ function ChartTooltip({ active, payload }: TooltipPayload): React.JSX.Element | 
   if (!bucket) return null
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-2.5 py-1.5 text-[12px] shadow-lg">
-      <div className="text-[var(--color-text)]">{shortLabel(bucket.date)}</div>
+      <div className="text-[var(--color-text)]">{weekdayLabel(bucket.date)}</div>
       <div className="text-[var(--color-text-muted)]">
         {formatDuration(bucket.focusMs)} · {bucket.sessions} session{bucket.sessions === 1 ? '' : 's'}
       </div>
@@ -56,6 +74,9 @@ export function DailyChart({ daily }: { daily: DailyBucket[] }): React.JSX.Eleme
   // Dense ranges (year/all) would collide on every label; let recharts thin them out rather
   // than fighting it with a fixed interval that assumes a particular range length.
   const tickInterval = daily.length > 45 ? 'preserveStartEnd' : 0
+  // A week fits the weekday on the axis without crowding ("Thu 24 Sep"); anything longer
+  // falls back to the compact "D MMM" `shortLabel` so the ticks stay legible.
+  const axisLabel = daily.length <= 7 ? weekdayLabel : shortLabel
 
   return (
     <div className="h-56 min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-3">
@@ -64,7 +85,7 @@ export function DailyChart({ daily }: { daily: DailyBucket[] }): React.JSX.Eleme
           <CartesianGrid stroke="var(--color-border)" vertical={false} />
           <XAxis
             dataKey="date"
-            tickFormatter={shortLabel}
+            tickFormatter={axisLabel}
             interval={tickInterval}
             tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
             axisLine={{ stroke: 'var(--color-border)' }}

@@ -12,7 +12,7 @@
  * west of UTC.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Priority, TaskWithStats } from '@shared/types'
 import { todoistTaskUrl } from '@shared/types'
 import { Button, IconButton } from '@renderer/components/timer/Button'
@@ -72,7 +72,14 @@ function Field({
   )
 }
 
-export function TaskDetail(): React.JSX.Element | null {
+export interface TaskDetailProps {
+  /** True when the panel is too narrow to show the list and the detail side by side, so
+   *  this renders as a full-panel overlay (see `index.tsx`'s `@[34rem]` container query).
+   *  Only affects focus behaviour here — the overlay's own positioning is pure CSS. */
+  overlay?: boolean
+}
+
+export function TaskDetail({ overlay = false }: TaskDetailProps): React.JSX.Element | null {
   const selectedTaskId = useTasksStore((s) => s.selectedTaskId)
   const tasks = useTasksStore((s) => s.tasks)
   const completedTasks = useTasksStore((s) => s.completedTasks)
@@ -94,6 +101,7 @@ export function TaskDetail(): React.JSX.Element | null {
   const [notes, setNotes] = useState('')
   const [estimate, setEstimate] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const titleRef = useRef<HTMLTextAreaElement>(null)
 
   const taskId = task?.id ?? null
 
@@ -107,6 +115,13 @@ export function TaskDetail(): React.JSX.Element | null {
     setEstimate(row?.estimatedPomodoros === null ? '' : String(row?.estimatedPomodoros ?? ''))
     setConfirming(false)
   }, [taskId])
+
+  // As a full-panel overlay the list is hidden behind this, so opening it should land focus
+  // here rather than leave it stranded on whatever the list row used to be. Side by side the
+  // list stays visible and usable, so this is left alone there.
+  useEffect(() => {
+    if (overlay && taskId !== null) titleRef.current?.focus()
+  }, [overlay, taskId])
 
   if (selectedTaskId === null) return null
   // The selection can outlive its row for a frame — after a delete, or a project switch
@@ -177,7 +192,12 @@ export function TaskDetail(): React.JSX.Element | null {
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-surface-raised)]">
+    <aside
+      className="flex h-full min-h-0 w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-surface-raised)]"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') void selectTask(null)
+      }}
+    >
       <header className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2.5">
         {project ? (
           <span className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--color-text-muted)]">
@@ -222,6 +242,7 @@ export function TaskDetail(): React.JSX.Element | null {
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
         <textarea
+          ref={titleRef}
           rows={2}
           value={title}
           aria-label="Task title"

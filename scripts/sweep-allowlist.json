@@ -55,12 +55,6 @@
   },
   {
     "rule": "fixed-width",
-    "file": "src/renderer/src/components/tasks/index.tsx",
-    "match": "w-[19rem]",
-    "reason": "Task detail form panel is deliberately fixed-width so its inputs don't stretch with the window (see the comment directly above this line) — it isn't one of the resizable shell panels."
-  },
-  {
-    "rule": "fixed-width",
     "file": "src/renderer/src/components/tasks/SubtaskList.tsx",
     "match": "w-[15px]",
     "reason": "Checkbox glyph size, not a layout width — a fixed-size square control, never resized."

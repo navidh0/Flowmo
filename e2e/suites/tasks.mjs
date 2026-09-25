@@ -34,13 +34,96 @@ async function clickDueDateQuickButton(page, label) {
   }, label)
 }
 
-/** Selects a task row by title, scrolling it into view first — belt-and-braces alongside
- *  the window resize above, in case the row is merely scrolled out of the list's own
- *  `overflow-y-auto`, not squeezed to zero width. */
+/** Selects a task row by title, scrolling it into view first, in case the row is merely
+ *  scrolled out of the list's own `overflow-y-auto`, not squeezed to zero width. */
 async function clickTaskRow(page, title) {
   const row = page.locator(`button[data-task-row]:has-text("${title}")`)
   await row.scrollIntoViewIfNeeded()
   await row.click()
+}
+
+/** The real (non-mini) window's minimum size, `[width, height]` — same window `onMain`
+ *  targets, via the harness's own alive-window filter. */
+async function getMainMinimumSize(app) {
+  return app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()
+      .filter((x) => !x.isDestroyed() && !x.webContents.isDestroyed())
+      .find((x) => !x.webContents.getURL().includes('mini'))
+    return w ? w.getMinimumSize() : null
+  })
+}
+
+/**
+ * Selecting a task must never make the list unreachable — the bug this suite exists to
+ * catch: at a narrow 'main' panel (PANEL_MIN_WIDTH.main = 280, src/shared/types.ts, can be
+ * narrower than the task detail panel's 19rem), the list either stays visible beside the
+ * detail, or the detail opens as an overlay whose close control returns to a visible, still
+ * clickable list — either way, real geometry (`boundingBox().width > 0`, `isVisible()`),
+ * never just DOM presence.
+ */
+async function checkDetailAndListReachable(page, check, title, sizeLabel) {
+  await clickTaskRow(page, title)
+  await sleep(300)
+
+  const titleField = page.locator('[aria-label="Task title"]')
+  const detailVisible = await titleField.isVisible().catch(() => false)
+  const detailBox = detailVisible ? await titleField.boundingBox() : null
+  check(
+    `[${sizeLabel}] selecting "${title}" shows the detail panel`,
+    detailVisible && !!detailBox && detailBox.width > 0,
+    JSON.stringify({ detailVisible, detailBox })
+  )
+
+  const shownTitle = detailVisible ? await titleField.inputValue() : null
+  check(
+    `[${sizeLabel}] detail shows the selected task's title`,
+    shownTitle === title,
+    `detail title field: ${JSON.stringify(shownTitle)}`
+  )
+
+  const rowLocator = page.locator(`button[data-task-row]:has-text("${title}")`)
+  const rowVisibleWhileOpen = await rowLocator.isVisible().catch(() => false)
+
+  // If the row isn't visible side by side, the ONLY acceptable reason is a genuine
+  // full-panel overlay (real geometry, not just DOM presence): the detail's outer box must
+  // actually match the panel's own box, not merely a fixed-width sliver that happens to have
+  // squeezed the list to nothing — which is exactly the bug this suite exists to catch. A
+  // fixed-width sliver overflowing a too-narrow container would NOT match this (it is
+  // usually wider than the container, or offset from its left edge by whatever the squeezed
+  // list left behind).
+  // Scoped inside the panel root: `<aside>` alone would also match the (unrelated) project
+  // sidebar's own `<aside>` in the shell's other column.
+  const panelBox = await page.locator('[data-tasks-panel-root]').boundingBox()
+  const asideBox = await page.locator('[data-tasks-panel-root] aside').first().boundingBox()
+  const genuineOverlay =
+    !!panelBox &&
+    !!asideBox &&
+    Math.abs(asideBox.width - panelBox.width) <= 4 &&
+    Math.abs(asideBox.x - panelBox.x) <= 4
+  check(
+    `[${sizeLabel}] the list is visible side by side, or the detail is a genuine full-panel overlay`,
+    rowVisibleWhileOpen || genuineOverlay,
+    JSON.stringify({ rowVisibleWhileOpen, panelBox, asideBox })
+  )
+
+  await page.click('[aria-label="Close details"]')
+  await sleep(300)
+
+  const rowVisibleAfterClose = await rowLocator.isVisible().catch(() => false)
+  const rowBoxAfterClose = rowVisibleAfterClose ? await rowLocator.boundingBox() : null
+  check(
+    `[${sizeLabel}] closing the detail returns to a visible task list`,
+    rowVisibleAfterClose && !!rowBoxAfterClose && rowBoxAfterClose.width > 0,
+    JSON.stringify({ rowVisibleAfterClose, rowBoxAfterClose })
+  )
+
+  // Prove the row is clickable again, not merely painted — reopen and close once more.
+  await clickTaskRow(page, title)
+  await sleep(300)
+  const reopened = await page.locator('[aria-label="Task title"]').isVisible().catch(() => false)
+  check(`[${sizeLabel}] the row is clickable again after closing the detail`, reopened)
+  await page.click('[aria-label="Close details"]')
+  await sleep(200)
 }
 
 export async function run() {
@@ -53,20 +136,11 @@ export async function run() {
     app = launched.app
     const page = launched.page
 
-    // Give the task list + detail panel comfortable room, deliberately not relying on the
-    // default window size. `PANEL_MIN_WIDTH.main` (280, src/shared/types.ts) is narrower
-    // than the task detail panel's own fixed width (`w-[19rem]` = 304px,
-    // src/renderer/src/components/tasks/index.tsx) — a real app-side inconsistency reported
-    // in this run rather than worked around here. At the default 1040×720 window, a
-    // platform's title-bar/DPI accounting can apparently squeeze the 'main' panel enough
-    // (observed on Windows CI, not locally on Linux) that once the detail panel opens the
-    // task list column collapses to zero width: Playwright resolves the row but reports
-    // "element is not visible" forever. Resizing generously up front makes this suite
-    // robust to that platform difference, since it exists to test task CRUD, not to probe
-    // the exact width where that layout edge case bites.
-    await onMain(app, 'w.setBounds({ x: 0, y: 0, width: 1600, height: 900 })')
-    await sleep(300)
-
+    // Deliberately the app's own default window size (1040×720, src/main/windows.ts) — not
+    // resized up front. The task detail panel now responds to its OWN width (a `@container`
+    // query in src/renderer/src/components/tasks/index.tsx) rather than assuming the 'main'
+    // shell panel around it is always wide enough, so this suite runs at the size real users
+    // (and Windows CI) actually see instead of dodging the case where it isn't.
     await page.click('[aria-label="Focus"]')
     await sleep(400)
 
@@ -97,6 +171,21 @@ export async function run() {
     await addTask('Task due tomorrow')
     await addTask('Task to delete')
 
+    // ── Detail panel stays reachable at any panel width ───────────────────────────
+    await checkDetailAndListReachable(page, check, 'Task due today', 'default window size')
+
+    const minSize = await getMainMinimumSize(app)
+    if (minSize) {
+      await onMain(app, `w.setSize(${minSize[0]}, ${minSize[1]})`)
+      await sleep(400)
+      await checkDetailAndListReachable(page, check, 'Task due today', 'minimum window width')
+      // Back to the default so the rest of the suite (due-date buttons, etc.) has its usual room.
+      await onMain(app, 'w.setSize(1040, 720)')
+      await sleep(400)
+    } else {
+      skip('minimum-width detail reachability', "could not read the main window's minimum size")
+    }
+
     await clickTaskRow(page, 'Task due today')
     await sleep(300)
     let ok = await clickDueDateQuickButton(page, 'Today')
@@ -114,6 +203,13 @@ export async function run() {
     await sleep(400)
     const subtaskVisible = await page.isVisible('text=A subtask')
     check('subtask created via the UI', subtaskVisible)
+
+    // At the app's default window size the task detail panel is commonly an overlay (this
+    // is the very layout this suite exists to exercise — see `checkDetailAndListReachable`
+    // above), so the previous task's detail has to be closed before another row is
+    // reachable, same as a real user would have to.
+    await page.click('[aria-label="Close details"]')
+    await sleep(200)
 
     await clickTaskRow(page, 'Task due tomorrow')
     await sleep(300)

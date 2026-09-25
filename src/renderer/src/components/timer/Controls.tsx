@@ -47,7 +47,7 @@ export function Controls(): React.JSX.Element {
 
   if (fresh || armed) {
     return (
-      <div className="flex items-center justify-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2">
         <Button
           size="lg"
           variant="primary"
@@ -77,7 +77,7 @@ export function Controls(): React.JSX.Element {
   const takeBreakIsPrimary = running && breakAvailable
 
   return (
-    <div className="flex items-center justify-center gap-2">
+    <div className="flex flex-wrap items-center justify-center gap-2">
       {takeBreakIsPrimary ? (
         <Button
           size="lg"

@@ -38,7 +38,11 @@ export function AllDayRow({ dayMs, events, feedColors }: AllDayRowProps): React.
           tabIndex={0}
           title={e.location ? `${e.title} — ${e.location}` : e.title}
           aria-label={`All-day: ${e.title}`}
-          className="truncate rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-on-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
+          // `--color-on-swatch`, not `--color-on-accent`: this fill is a calendar feed's own
+          // colour, a swatch someone picked (or `eventColor`'s theme-independent fallback),
+          // not a design accent — see the token's own comment in index.css and
+          // timeline/Block.tsx's.
+          className="truncate rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-on-swatch)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
           style={{ backgroundColor: eventColor(e.feedId, feedColors) }}
         >
           {e.title}

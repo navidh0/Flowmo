@@ -10,6 +10,7 @@ import { useMemo } from 'react'
 import type { CalendarEvent, Project, Session, Weekday } from '@shared/types'
 import { formatDuration, toLocalDateKey } from '@renderer/lib/format'
 import { formatClockTime, formatDayHeading, formatEventStart } from './format'
+import { eventColor } from './blocks'
 import { isInMonth, localDayBounds, monthGrid } from './layout'
 import {
   allDayEventsForDay,
@@ -91,7 +92,7 @@ export function MonthView({
           const allDayChips: MonthCellChip[] = allDayEventsForDay(calendarEvents, dayMs).map((e) => ({
             key: `all-${e.id}`,
             title: e.title,
-            color: feedColors.get(e.feedId) ?? 'var(--color-focus)',
+            color: eventColor(e.feedId, feedColors),
             time: null,
             tooltip: e.title
           }))
@@ -105,7 +106,7 @@ export function MonthView({
               return {
                 key: `timed-${occ.event.id}`,
                 title: occ.event.title,
-                color: feedColors.get(occ.event.feedId) ?? 'var(--color-focus)',
+                color: eventColor(occ.event.feedId, feedColors),
                 time: occ.continuesFromPrevious ? null : formatClockTime(occ.event.startMs),
                 tooltip: occ.continuesFromPrevious ? occ.event.title : `${startLabel} ${occ.event.title}`
               }
@@ -146,7 +147,11 @@ export function MonthView({
                   <span
                     key={chip.key}
                     title={chip.tooltip}
-                    className="truncate rounded px-1 py-0.5 text-[10px] font-medium text-[var(--color-on-accent)]"
+                    // `--color-on-swatch`, not `--color-on-accent`: `chip.color` is a
+                    // calendar feed's own colour (a swatch someone picked, or `eventColor`'s
+                    // theme-independent fallback), not a design accent — see the token's own
+                    // comment in index.css and timeline/Block.tsx's.
+                    className="truncate rounded px-1 py-0.5 text-[10px] font-medium text-[var(--color-on-swatch)]"
                     style={{ backgroundColor: chip.color }}
                   >
                     {chip.time ? `${chip.time} ` : ''}

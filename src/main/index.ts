@@ -7,7 +7,7 @@
  * only this file has to be read to understand how the app is assembled.
  */
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { EV } from '@shared/channels'
 import type { PhaseEndEvent, Settings, TimerState } from '@shared/types'
@@ -30,6 +30,7 @@ import { setLinuxAutostart } from './autostart'
 // and updater.ts only touches it once it has ruled out dev, portable, deb and test builds.
 import { autoUpdater } from 'electron-updater'
 import {
+  applyThemeBackground,
   broadcast,
   configureMiniWidget,
   createMainWindow,
@@ -75,6 +76,10 @@ let miniPositionTimer: NodeJS.Timeout | null = null
  */
 let lastMiniPosition: Point | null = null
 
+/** Pending mini-widget size write and its last report: the position's twin, same reasons. */
+let miniSizeTimer: NodeJS.Timeout | null = null
+let lastMiniSize: { width: number; height: number } | null = null
+
 /** Opens the mini widget while the main window is off screen. Created once settings load. */
 let miniAuto: MiniAuto
 
@@ -106,6 +111,12 @@ if (!gotLock) {
 
     getDb()
     settings = settingsRepo.get()
+
+    // Before any window exists, so the first paint and the renderer's first
+    // prefers-color-scheme read already agree with the setting. The OS switching scheme
+    // under 'system' repaints the window backgrounds; the CSS follows on its own.
+    applyTheme(settings.theme)
+    nativeTheme.on('updated', applyThemeBackground)
 
     timer = createTimerService({
       getSettings: () => settings,
@@ -175,7 +186,9 @@ if (!gotLock) {
 
     configureMiniWidget({
       getSavedPosition: () => settingsRepo.getMiniPosition(),
-      onMoved: rememberMiniPosition
+      onMoved: rememberMiniPosition,
+      getSavedSize: () => settingsRepo.getMiniSize(),
+      onResized: rememberMiniSize
     })
     miniAuto = createMiniAuto({
       getSettings: () => settings,
@@ -241,6 +254,11 @@ if (!gotLock) {
       // (see lastMiniPosition's doc comment).
       if (lastMiniPosition) settingsRepo.setMiniPosition(lastMiniPosition)
     }
+    if (miniSizeTimer) {
+      clearTimeout(miniSizeTimer)
+      miniSizeTimer = null
+      if (lastMiniSize) settingsRepo.setMiniSize(lastMiniSize)
+    }
     updater?.dispose()
     todoist?.stop()
     calendars?.stop()
@@ -272,6 +290,16 @@ function rememberMiniPosition(position: Point): void {
   miniPositionTimer = setTimeout(() => {
     miniPositionTimer = null
     settingsRepo.setMiniPosition(position)
+  }, 400)
+}
+
+/** And for its size, which a resize reports every frame the same way. */
+function rememberMiniSize(size: { width: number; height: number }): void {
+  lastMiniSize = size
+  if (miniSizeTimer) clearTimeout(miniSizeTimer)
+  miniSizeTimer = setTimeout(() => {
+    miniSizeTimer = null
+    settingsRepo.setMiniSize(size)
   }, 400)
 }
 
@@ -365,6 +393,7 @@ function reloadAfterImport(): void {
 
   // The service mirrors `mode`; idle, this only re-arms it.
   timer.setMode(settings.mode)
+  applyTheme(settings.theme)
   reregisterHotkeys(settings)
   applyLaunchAtLogin(settings.launchAtLogin)
   updater.settingsChanged(settings)
@@ -378,6 +407,17 @@ function reloadAfterImport(): void {
   for (const win of [getMainWindow(), getMiniWindow()]) {
     if (win && !win.webContents.isDestroyed()) win.webContents.reload()
   }
+}
+
+/**
+ * The theme setting drives Chromium's `prefers-color-scheme` in every renderer (index.css
+ * switches its tokens on it) and the native chrome, so no renderer code has to know.
+ * Window backgrounds are repainted directly as well: whether setting `themeSource` emits
+ * nativeTheme's 'updated' depends on the effective scheme actually changing.
+ */
+function applyTheme(theme: Settings['theme']): void {
+  nativeTheme.themeSource = theme
+  applyThemeBackground()
 }
 
 /**
@@ -427,6 +467,8 @@ function applySettingsPatch(patch: Partial<Settings>): Settings {
   if (patch.launchAtLogin !== undefined) {
     applyLaunchAtLogin(settings.launchAtLogin)
   }
+
+  if (patch.theme !== undefined) applyTheme(settings.theme)
 
   if (patch.showMiniWidget !== undefined) {
     // The user chose explicitly (settings, tray or IPC), so an auto-opened widget is theirs now.

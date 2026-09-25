@@ -28,8 +28,12 @@ export interface TimelineBlock extends OverlapInterval {
   timeZone: string | null
 }
 
-const NEUTRAL = 'var(--color-text-muted)'
-const BREAK_COLOR = 'var(--color-break)'
+// Theme-independent "swatch" tokens (identical in both palettes — see their comments in
+// index.css), not the design accents `--color-text-muted`/`--color-break`: `block.color`
+// fills sit under `--color-on-swatch` text (timeline/Block.tsx), which only stays legible
+// on a colour that doesn't get darkened for light-mode text contrast the way those two do.
+const NEUTRAL = 'var(--color-swatch-neutral)'
+const BREAK_COLOR = 'var(--color-swatch-break)'
 
 function projectColor(projectId: number | null, projects: Project[]): string {
   if (projectId === null) return NEUTRAL
@@ -93,8 +97,10 @@ export function runningBlock(
 }
 
 /** Fallback when a feed's colour is unknown — the feed list hasn't loaded, failed to load, or
- *  (in principle) the event's feed was deleted between fetches. */
-const EVENT_COLOR = 'var(--color-focus)'
+ *  (in principle) the event's feed was deleted between fetches. `--color-swatch-event`, not
+ *  `--color-focus` — same reasoning as NEUTRAL/BREAK_COLOR above, this fills the same
+ *  `block.color` slot under `--color-on-swatch` text. */
+const EVENT_COLOR = 'var(--color-swatch-event)'
 
 export function eventColor(feedId: number, feedColors: Map<number, string>): string {
   return feedColors.get(feedId) ?? EVENT_COLOR

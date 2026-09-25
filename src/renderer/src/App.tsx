@@ -9,6 +9,7 @@ import { MiniWidget } from './components/mini'
 import { NavBar, ResizableShell, type Screen } from './components/shell'
 import { ProjectSidebar, TasksPanel } from './components/tasks'
 import { TimerPanel } from './components/timer'
+import { initPhaseSounds } from './lib/sounds'
 import { useTasksStore } from './stores/tasks'
 import { useTimerStore, useTimerSync } from './stores/timer'
 
@@ -53,12 +54,45 @@ export default function App(): React.JSX.Element {
   const isMini = useIsMiniRoute()
   useTimerSync()
 
+  // On <html>, so index.css can rescale the spacing base for everything under it — in both
+  // windows, since they share this component and the same settings broadcast.
+  const density = useTimerStore((s) => s.settings.density)
+  useEffect(() => {
+    document.documentElement.dataset.density = density
+  }, [density])
+
+  // The theme is an attribute on <html> too, rather than index.css reading
+  // prefers-color-scheme: whether Chromium feeds nativeTheme.themeSource into that media
+  // query depends on the Linux desktop's colour-scheme portal, and on a bare X session it
+  // doesn't, so light would paint a light window frame around dark content. Only 'system'
+  // asks the OS, and follows it live.
+  const theme = useTimerStore((s) => s.settings.theme)
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme !== 'system') {
+      root.dataset.theme = theme
+      return
+    }
+    const dark = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = (): void => {
+      root.dataset.theme = dark.matches ? 'dark' : 'light'
+    }
+    apply()
+    dark.addEventListener('change', apply)
+    return () => dark.removeEventListener('change', apply)
+  }, [theme])
+
   if (isMini) return <MiniWidget />
   return <MainShell />
 }
 
 function MainShell(): React.JSX.Element {
   useRefreshTasksOnPhaseEnd()
+
+  // Chimes play from the main window only: the mini widget loads this same bundle and
+  // receives the same phase-end event, so wiring it there too would play every chime twice.
+  // The main renderer stays alive while hidden to the tray, so it can still play then.
+  useEffect(() => initPhaseSounds(() => useTimerStore.getState().settings), [])
 
   // Which screen is open is not a setting: the app should always reopen on Focus.
   const [screen, setScreen] = useState<Screen>('focus')

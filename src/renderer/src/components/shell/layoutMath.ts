@@ -10,6 +10,51 @@ import type { LayoutSettings, PanelId } from '@shared/types'
 /** Width a collapsed non-flexing panel occupies — just enough for its expand affordance. */
 export const RAIL_WIDTH = 40
 
+/**
+ * Display name for each panel, shared by the collapse/expand affordance in `ResizableShell`
+ * and the reorder control in Settings → Layout, so the two always agree on what a panel is
+ * called. `main` reads "Tasks" — what that column actually shows on the Focus screen —
+ * rather than the internal `PanelId`.
+ */
+export const PANEL_LABEL: Record<PanelId, string> = {
+  projects: 'Projects',
+  timer: 'Timer',
+  main: 'Tasks'
+}
+
+export type MoveDirection = 'left' | 'right'
+
+/**
+ * Moves `id` one slot left or right in `layout.order`, swapping it with its neighbour.
+ * A no-op (returns `layout` unchanged) at either end — there is nothing to swap with past
+ * the first or last position, so the caller's "disabled at the ends" button state and this
+ * function's own behaviour agree without either needing to duplicate the other's bounds
+ * check.
+ *
+ * The swap can change which panel flexes (the new last slot) — if that panel was collapsed,
+ * collapsing the flexing panel is an invariant `LayoutSettings.collapsed` must never violate
+ * (see its own doc comment), so it is dropped from `collapsed` here rather than leaving that
+ * to the settings-repo validator to clean up after the fact.
+ */
+export function movePanel(layout: LayoutSettings, id: PanelId, direction: MoveDirection): LayoutSettings {
+  const order = [...layout.order]
+  const index = order.indexOf(id)
+  if (index === -1) return layout
+
+  const target = direction === 'left' ? index - 1 : index + 1
+  if (target < 0 || target >= order.length) return layout
+
+  const neighbour = order[target]
+  if (neighbour === undefined) return layout
+  order[target] = id
+  order[index] = neighbour
+
+  const flexing = order[order.length - 1]
+  const collapsed = layout.collapsed.filter((p) => p !== flexing)
+
+  return { ...layout, order, collapsed }
+}
+
 const ALL_VISIBLE: Partial<Record<PanelId, unknown>> = { projects: true, timer: true, main: true }
 
 /** The panel that flexes to fill remaining space: the last VISIBLE entry in `order`. */

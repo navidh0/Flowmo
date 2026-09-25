@@ -37,7 +37,12 @@ export function EarnedBreak(): React.JSX.Element | null {
 
   return (
     <div
-      className="w-[320px] rounded-2xl border px-4 pt-2 pb-2.5"
+      // `w-full max-w-[320px]` rather than a fixed `w-[320px]`: at the timer panel's own
+      // minimum width this card is wider than the panel, which used to force the whole
+      // panel to scroll horizontally (v0.4's known bug) — `w-full` lets it shrink with its
+      // (centred, `items-center`) parent instead, while the max keeps its usual 320px size
+      // everywhere the panel has room for it.
+      className="w-full max-w-[320px] rounded-2xl border px-4 pt-2 pb-2.5"
       style={{
         borderColor: 'color-mix(in srgb, var(--color-break) 26%, transparent)',
         background: 'color-mix(in srgb, var(--color-break) 7%, transparent)'

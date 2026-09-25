@@ -10,7 +10,9 @@ vi.mock('electron', () => ({
 }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
 
-const { clampBoundsToArea, bottomRightCorner, MINI_SIZE } = await import('../src/main/windows')
+const { clampBoundsToArea, bottomRightCorner, fitMiniSize, MINI_SIZE, MINI_MAX_SIZE } = await import(
+  '../src/main/windows'
+)
 
 describe('clampBoundsToArea', () => {
   const area = { x: 0, y: 0, width: 1920, height: 1080 }
@@ -84,5 +86,33 @@ describe('bottomRightCorner', () => {
   it('never places the widget above or left of a tiny work area', () => {
     const area = { x: 100, y: 50, width: 200, height: 60 }
     expect(bottomRightCorner(area, MINI_SIZE)).toEqual({ x: 100, y: 50 })
+  })
+})
+
+describe('fitMiniSize', () => {
+  it('opens at the default size when nothing was saved', () => {
+    expect(fitMiniSize(null)).toEqual(MINI_SIZE)
+  })
+
+  it('passes a size inside the limits through unchanged', () => {
+    expect(fitMiniSize({ width: 360, height: 150 })).toEqual({ width: 360, height: 150 })
+  })
+
+  it('never opens smaller than the layout was built for', () => {
+    expect(fitMiniSize({ width: 100, height: 40 })).toEqual(MINI_SIZE)
+    expect(fitMiniSize({ width: -50, height: -1 })).toEqual(MINI_SIZE)
+  })
+
+  it('never opens larger than the maximum, e.g. a size saved before the limit shrank', () => {
+    expect(fitMiniSize({ width: 1200, height: 900 })).toEqual(MINI_MAX_SIZE)
+  })
+
+  it('clamps each dimension on its own', () => {
+    expect(fitMiniSize({ width: 1200, height: 100 })).toEqual({ width: MINI_MAX_SIZE.width, height: 100 })
+    expect(fitMiniSize({ width: 300, height: 10 })).toEqual({ width: 300, height: MINI_SIZE.height })
+  })
+
+  it('rounds to whole pixels (fractional sizes come from scaled displays)', () => {
+    expect(fitMiniSize({ width: 300.6, height: 120.4 })).toEqual({ width: 301, height: 120 })
   })
 })

@@ -132,6 +132,12 @@ export interface Settings {
   /** Check for, and download, new versions in the background (installer builds only). */
   autoUpdate: boolean
   theme: 'system' | 'light' | 'dark'
+  /**
+   * How much room the interface gives each element. 'compact' tightens every spacing and
+   * sizing utility at once — it scales Tailwind's `--spacing` base — for small screens and
+   * long task lists. Applies to both windows.
+   */
+  density: Density
 
   hotkeyStartPause: string
   hotkeySkip: string
@@ -152,6 +158,11 @@ export interface Settings {
   /** Shell arrangement. See `LayoutSettings`. */
   layout: LayoutSettings
 }
+
+export type Density = 'comfortable' | 'compact'
+
+/** Every `Density`, the one list validators and pickers iterate. */
+export const DENSITIES: readonly Density[] = ['comfortable', 'compact']
 
 /** A day of the week in `Date#getDay()` numbering: 0 = Sunday … 6 = Saturday. */
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
@@ -229,6 +240,7 @@ export const DEFAULT_SETTINGS: Settings = {
   miniWidgetOnMinimize: true,
   autoUpdate: true,
   theme: 'system',
+  density: 'comfortable',
 
   // Control+Alt+Space is the obvious choice and was the original default, but it is
   // already claimed on Windows (IME / Office bindings) — verified by probing

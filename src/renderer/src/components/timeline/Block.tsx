@@ -6,6 +6,18 @@
  * mouse. Positioned by the caller via `style` (percentage top/height from `dayFraction`,
  * percentage left/width from the overlap column) — never a fixed pixel width, so the block
  * still fits a 280px panel.
+ *
+ * The label text is `--color-on-swatch` (near-black in both themes — see its own comment in
+ * index.css), never `--color-on-accent`: `block.color` is always a "swatch" in the sense that
+ * matters here — either a project/calendar-feed colour a person picked freely (amber, lime,
+ * cyan, …), or blocks.ts's own NEUTRAL/BREAK_COLOR/EVENT_COLOR fallback (a no-project
+ * session, a break, an uncoloured feed), which point at the theme-independent
+ * `--color-swatch-*` tokens for exactly this reason. Light mode's `--color-on-accent` is
+ * near-white — readable on the *design* accents (`--color-focus`/`--color-break`/…) this
+ * file's light palette deliberately darkens, not on any of the above, where it can drop to
+ * ~2:1. An abandoned (stopped-early) block has no real fill behind its text — just the
+ * dashed stripe pattern over whatever the page surface is — so it uses plain `--color-text`
+ * instead, the same as everything else sitting directly on the surface.
  */
 
 import { useTimelineStore } from '@renderer/stores/timeline'
@@ -80,8 +92,10 @@ export function Block({
         tabIndex={0}
         aria-label={label}
         title={label}
-        className={`group/block relative h-full min-h-[3px] w-full overflow-hidden rounded-[4px] text-left text-[10px] leading-tight text-[var(--color-on-accent)] outline-none focus-visible:ring-2 focus-visible:ring-white ${
-          block.abandoned ? 'bg-[repeating-linear-gradient(135deg,var(--tint),var(--tint)_4px,transparent_4px,transparent_8px)]' : ''
+        className={`group/block relative h-full min-h-[3px] w-full overflow-hidden rounded-[4px] text-left text-[10px] leading-tight outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40 ${
+          block.abandoned
+            ? 'bg-[repeating-linear-gradient(135deg,var(--tint),var(--tint)_4px,transparent_4px,transparent_8px)] text-[var(--color-text)]'
+            : 'text-[var(--color-on-swatch)]'
         } ${KIND_STYLE[block.kind]}`}
         style={
           {

@@ -13,13 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { DEFAULT_LAYOUT, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from '@shared/types'
 import type { LayoutSettings, PanelId } from '@shared/types'
-import { clampPanelWidth, effectivePanelWidths, flexPanelId } from './layoutMath'
-
-const PANEL_LABEL: Record<PanelId, string> = {
-  projects: 'Projects',
-  timer: 'Timer',
-  main: 'Main'
-}
+import { clampPanelWidth, effectivePanelWidths, flexPanelId, PANEL_LABEL } from './layoutMath'
 
 const KEYBOARD_STEP = 16
 
@@ -191,7 +185,7 @@ export function ResizableShell({
 
         if (isFlex) {
           return (
-            <div key={id} className="min-w-0 flex-1">
+            <div key={id} data-panel={id} className="min-w-0 flex-1">
               {panels[id]}
             </div>
           )
@@ -203,7 +197,9 @@ export function ResizableShell({
         const width = effectiveWidths[id]
 
         return (
-          <div key={id} className="flex h-full shrink-0" style={{ width }}>
+          // `data-panel` names the column for e2e: the order a person arranged in Settings →
+          // Layout is otherwise invisible in the DOM (the flex panel has no divider or label).
+          <div key={id} data-panel={id} className="flex h-full shrink-0" style={{ width }}>
             <div className="h-full min-w-0 flex-1 overflow-hidden">
               {!isCollapsed && panels[id]}
             </div>

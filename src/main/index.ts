@@ -66,6 +66,15 @@ let boundsTimer: NodeJS.Timeout | null = null
 /** Pending mini-widget position write, debounced the same way. */
 let miniPositionTimer: NodeJS.Timeout | null = null
 
+/**
+ * The last position `rememberMiniPosition` was told about, kept around so `before-quit` can
+ * flush it even once the mini widget itself is gone. A drag can be immediately followed by
+ * the widget closing (the user clicks away, or the option auto-closes it) well inside the
+ * 400ms debounce; reading the live window's position at flush time would then find no window
+ * and silently drop a position the user just chose, instead of writing what was last reported.
+ */
+let lastMiniPosition: Point | null = null
+
 /** Opens the mini widget while the main window is off screen. Created once settings load. */
 let miniAuto: MiniAuto
 
@@ -171,6 +180,13 @@ if (!gotLock) {
     miniAuto = createMiniAuto({
       getSettings: () => settings,
       isMiniOpen: () => !!getMiniWindow(),
+      // A live query, not a cached flag — see MiniAutoDeps.isMainAway's doc comment for why
+      // this has to reflect the window's real state at the moment it's asked, not the event
+      // that triggered the ask.
+      isMainAway: () => {
+        const win = getMainWindow()
+        return !win || win.isMinimized() || !win.isVisible()
+      },
       openMini: () => setMiniWidget(true),
       closeMini: () => setMiniWidget(false)
     })
@@ -221,8 +237,9 @@ if (!gotLock) {
     if (miniPositionTimer) {
       clearTimeout(miniPositionTimer)
       miniPositionTimer = null
-      const [x, y] = getMiniWindow()?.getPosition() ?? []
-      if (x !== undefined && y !== undefined) settingsRepo.setMiniPosition({ x, y })
+      // The last reported position, not the live window: it may already be closed by now
+      // (see lastMiniPosition's doc comment).
+      if (lastMiniPosition) settingsRepo.setMiniPosition(lastMiniPosition)
     }
     updater?.dispose()
     todoist?.stop()
@@ -250,6 +267,7 @@ function rememberBounds(bounds: WindowBounds): void {
 
 /** Same debounce for the mini widget, which reports every frame of a drag. */
 function rememberMiniPosition(position: Point): void {
+  lastMiniPosition = position
   if (miniPositionTimer) clearTimeout(miniPositionTimer)
   miniPositionTimer = setTimeout(() => {
     miniPositionTimer = null

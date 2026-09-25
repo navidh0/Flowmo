@@ -103,6 +103,12 @@ itself once that gate passes. v0.4 finished the job.
 
 ---
 
+### v0.4.1 — the mini widget behaves on Windows
+
+- The mini widget could stay stuck open after a quick minimize and restore on Windows; it now
+  follows the window's real state.
+- A widget dragged just before quitting keeps its new position.
+
 ## Next
 
 ### v0.5 — making it yours

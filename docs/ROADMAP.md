@@ -137,9 +137,10 @@ itself once that gate passes. v0.4 finished the job.
 
 Released 2026-09-25.
 
-### v0.5.1 — the taskbar icon, properly this time
+### v0.5.1 — the taskbar icon and the widget's close button, properly this time
 
 - Windows taskbar, Start menu and shortcuts show the Flowdo icon: the exe's icon now has bitmap images at small sizes.
+- The mini widget's × works: it moved out of the corner, where Windows took the click for resizing or dragging.
 
 ## Next
 

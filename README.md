@@ -33,7 +33,8 @@ minutes spent, even though it didn't complete a round.
 - A Calendar screen with Day, Week and Month views: the sessions you
   actually worked alongside your calendar events. When a task or event was
   set in a different time zone than your computer's, both times are shown
-  (for example "07:15 Tehran · 07:45 local").
+  (for example "07:15 Tehran · 07:45 local"). The week starts on whichever
+  day you choose in Settings, Monday by default.
 - A stats page: today / week / year / all-time ranges, a daily chart, a
   per-project breakdown, a Pomodoro-vs-Flowmodoro split, and a streak.
 - Session history with per-session delete.

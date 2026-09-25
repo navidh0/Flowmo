@@ -66,6 +66,14 @@ jobs:
         run: npm run build && npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Copy app.asar out for the cross-platform drift check
+        # This artefact only ever carries installers, never an unpacked tree, so the
+        # publish job's Windows-vs-Linux drift check (e2e/drift.mjs --require-cross-platform)
+        # would otherwise have nothing to compare. app-win.asar is not itself a release
+        # asset — the publish job's upload step uploads an explicit allowlist that leaves it
+        # out.
+        shell: pwsh
+        run: Copy-Item release/win-unpacked/resources/app.asar release/app-win.asar
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows
@@ -76,6 +84,7 @@ jobs:
             release/*.exe
             release/*.blockmap
             release/latest.yml
+            release/app-win.asar
           if-no-files-found: error
 
   build-linux:
@@ -92,6 +101,12 @@ jobs:
       - run: npm ci
       - name: Build packages
         run: npm run build && npx electron-builder --linux --publish never
+      - name: Copy app.asar out for the cross-platform drift check
+        # Same reasoning as build-windows's equivalent step: only installers/packages are
+        # otherwise uploaded, so the publish job's cross-platform drift check would never
+        # find an asar to compare. Not itself a release asset — see the publish job's
+        # explicit upload allowlist.
+        run: cp release/linux-unpacked/resources/app.asar release/app-linux.asar
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux
@@ -103,6 +118,7 @@ jobs:
             release/*.deb
             release/*.blockmap
             release/latest-linux.yml
+            release/app-linux.asar
           if-no-files-found: error
 
   publish:
@@ -131,23 +147,24 @@ jobs:
       - name: Verify every expected file is present
         run: |
           set -euo pipefail
-          missing=()
-          check() {
-            if [ ! -f "$1" ]; then
-              missing+=("$1")
-            fi
-          }
           # Windows: NSIS + portable installers, the NSIS blockmap, and the Windows update
-          # feed.
-          check "dist/release-windows/Flowdo-Setup-$VERSION.exe"
-          check "dist/release-windows/Flowdo-Setup-$VERSION.exe.blockmap"
-          check "dist/release-windows/Flowdo-$VERSION-portable.exe"
-          check "dist/release-windows/latest.yml"
-          # Linux: AppImage + deb, and the Linux update feed. The AppImage blockmap is not
-          # required: electron-builder doesn't always produce one.
-          check "dist/release-linux/Flowdo-$VERSION.AppImage"
-          check "dist/release-linux/flowdo_${VERSION}_amd64.deb"
-          check "dist/release-linux/latest-linux.yml"
+          # feed. Linux: AppImage + deb, and the Linux update feed. The AppImage blockmap is
+          # not required: electron-builder doesn't always produce one.
+          expected=(
+            "dist/release-windows/Flowdo-Setup-$VERSION.exe"
+            "dist/release-windows/Flowdo-Setup-$VERSION.exe.blockmap"
+            "dist/release-windows/Flowdo-$VERSION-portable.exe"
+            "dist/release-windows/latest.yml"
+            "dist/release-linux/Flowdo-$VERSION.AppImage"
+            "dist/release-linux/flowdo_${VERSION}_amd64.deb"
+            "dist/release-linux/latest-linux.yml"
+          )
+          missing=()
+          for f in "${expected[@]}"; do
+            if [ ! -f "$f" ]; then
+              missing+=("$f")
+            fi
+          done
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Release v$VERSION is missing expected files; refusing to publish a partial release:"
             printf '::error::  %s\n' "${missing[@]}"
@@ -155,14 +172,22 @@ jobs:
             find dist -maxdepth 2 -type f
             exit 1
           fi
+          # Persisted for the "Tag and publish" step below: it uploads exactly this verified
+          # allowlist (plus any *.blockmap present) as release assets — never every file
+          # under dist/release-*/, which now also holds the cross-platform drift check's
+          # app-win.asar / app-linux.asar helper files (build-windows / build-linux above),
+          # and which is not something anyone should be downloading from the release page.
+          printf '%s\n' "${expected[@]}" > "$RUNNER_TEMP/expected-assets.txt"
       - name: Packaging drift check (Windows vs Linux)
         # The gate (ci.yml, above, reused as `needs: gate` on every push) already ran the
         # full e2e suite and a same-platform drift check against each platform's own
         # release/ output on its own runner. This is the one check that needs both
-        # platforms' artefacts side by side — versions, asar contents, and bundled
-        # Electron version must all agree between the Windows and Linux builds actually
-        # being published together as one release.
-        run: node e2e/drift.mjs dist/release-windows dist/release-linux
+        # platforms' artefacts side by side — versions and asar contents must agree between
+        # the Windows and Linux builds actually being published together as one release.
+        # --require-cross-platform: this is the one run of drift.mjs where both platforms'
+        # artefacts are always expected side by side, so a missing comparison (e.g. a build
+        # job's app-*.asar copy step regressing) must FAIL here, not silently SKIP.
+        run: node e2e/drift.mjs --require-cross-platform dist/release-windows dist/release-linux
       - name: Tag and publish
         run: |
           set -euo pipefail
@@ -176,8 +201,29 @@ jobs:
           tail -n +2 "docs/releases/v$VERSION.md" > "$RUNNER_TEMP/notes.md"
           gh release create "v$VERSION" --verify-tag --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
           # latest.yml and latest-linux.yml must keep these exact names on the release:
-          # electron-updater requests them by name from the latest GitHub release.
-          for f in dist/release-windows/* dist/release-linux/*; do
+          # electron-updater requests them by name from the latest GitHub release. Upload
+          # exactly the "Verify every expected file is present" step's allowlist, plus any
+          # *.blockmap present (the AppImage's is best-effort and wasn't in that allowlist) —
+          # never every file under dist/release-*/, which also holds the cross-platform
+          # check's app-win.asar / app-linux.asar helper files and must not be published.
+          declare -A seen=()
+          assets=()
+          add_asset() {
+            if [ -z "${seen[$1]:-}" ]; then
+              seen[$1]=1
+              assets+=("$1")
+            fi
+          }
+          while IFS= read -r f; do
+            add_asset "$f"
+          done < "$RUNNER_TEMP/expected-assets.txt"
+          for f in dist/release-windows/*.blockmap dist/release-linux/*.blockmap; do
+            [ -f "$f" ] || continue
+            add_asset "$f"
+          done
+          echo "Uploading release assets:"
+          printf '  %s\n' "${assets[@]}"
+          for f in "${assets[@]}"; do
             gh release upload "v$VERSION" "$f" --clobber
           done
           gh release view "v$VERSION" --json assets --jq '.assets[] | "\(.name) \(.size)"'

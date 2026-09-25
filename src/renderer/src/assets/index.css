@@ -19,6 +19,14 @@
   --color-p2: #f59e0b;
   --color-p3: #3b82f6;
   --color-p4: #6b7280;
+
+  /* Text/border/surface states that sit on top of an accent colour or as a hover step —
+     the same three values were being hand-typed as Tailwind arbitrary hexes in half a
+     dozen components; named here once so `scripts/sweep.mjs`'s hex-colour rule has one
+     real home for them instead of an allowlist entry per call site. */
+  --color-on-accent: #0a0d12;
+  --color-border-hover: #39414f;
+  --color-surface-hover: #1e222b;
 }
 
 @layer base {

@@ -80,7 +80,7 @@ export function Block({
         tabIndex={0}
         aria-label={label}
         title={label}
-        className={`group/block relative h-full min-h-[3px] w-full overflow-hidden rounded-[4px] text-left text-[10px] leading-tight text-[#0a0d12] outline-none focus-visible:ring-2 focus-visible:ring-white ${
+        className={`group/block relative h-full min-h-[3px] w-full overflow-hidden rounded-[4px] text-left text-[10px] leading-tight text-[var(--color-on-accent)] outline-none focus-visible:ring-2 focus-visible:ring-white ${
           block.abandoned ? 'bg-[repeating-linear-gradient(135deg,var(--tint),var(--tint)_4px,transparent_4px,transparent_8px)]' : ''
         } ${KIND_STYLE[block.kind]}`}
         style={

@@ -14,6 +14,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "sweep": "node scripts/sweep.mjs",
     "dist": "electron-vite build && electron-builder --win",
     "e2e": "node e2e/smoke.mjs"
   },

@@ -150,7 +150,7 @@ export function ProjectSidebar(): React.JSX.Element {
                 style={{ backgroundColor: swatch }}
               >
                 {project.color.toLowerCase() === swatch ? (
-                  <CheckIcon className="h-2.5 w-2.5 text-[#0a0d12]" />
+                  <CheckIcon className="h-2.5 w-2.5 text-[var(--color-on-accent)]" />
                 ) : null}
               </button>
             ))}

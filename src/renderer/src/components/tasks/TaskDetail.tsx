@@ -341,7 +341,7 @@ export function TaskDetail(): React.JSX.Element | null {
                   className={`flex items-center justify-center gap-1.5 rounded-md border px-1 py-1.5 text-[11px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-[var(--color-focus)]/60 ${
                     active
                       ? 'text-[var(--color-text)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[#39414f] hover:text-[var(--color-text)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-border-hover)] hover:text-[var(--color-text)]'
                   }`}
                   style={
                     active

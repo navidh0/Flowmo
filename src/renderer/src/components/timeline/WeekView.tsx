@@ -146,7 +146,7 @@ export function WeekView({
                     tabIndex={0}
                     title={item.event.title}
                     aria-label={`All-day: ${item.event.title}`}
-                    className="absolute truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[#0a0d12] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
+                    className="absolute truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-on-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
                     style={{
                       left: `${item.startMs * widthPct}%`,
                       width: `${(item.endMs - item.startMs) * widthPct}%`,

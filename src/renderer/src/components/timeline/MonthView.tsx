@@ -128,7 +128,7 @@ export function MonthView({
                 <span
                   className={`text-[11px] ${
                     isToday
-                      ? 'flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-focus)] font-semibold text-[#0a0d12]'
+                      ? 'flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-focus)] font-semibold text-[var(--color-on-accent)]'
                       : 'text-[var(--color-text)]'
                   }`}
                 >
@@ -146,7 +146,7 @@ export function MonthView({
                   <span
                     key={chip.key}
                     title={chip.tooltip}
-                    className="truncate rounded px-1 py-0.5 text-[10px] font-medium text-[#0a0d12]"
+                    className="truncate rounded px-1 py-0.5 text-[10px] font-medium text-[var(--color-on-accent)]"
                     style={{ backgroundColor: chip.color }}
                   >
                     {chip.time ? `${chip.time} ` : ''}

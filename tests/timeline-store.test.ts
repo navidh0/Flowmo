@@ -14,6 +14,15 @@ process.env.TZ = 'America/Los_Angeles'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlowdoApi, Weekday } from '@shared/types'
 
+// The store reads `window.flowdo`, typed by src/preload/index.d.ts — which the node tsconfig
+// that checks tests/ never sees, because src/preload/index.ts shadows its sibling .d.ts.
+// Restate the same augmentation here so the store type-checks under this project too.
+declare global {
+  interface Window {
+    flowdo: FlowdoApi
+  }
+}
+
 interface Fake {
   bridge: FlowdoApi
   subscriptions: () => number

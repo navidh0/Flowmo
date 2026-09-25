@@ -1,0 +1,10 @@
+# Normalize line endings for all text files to LF in the working tree, on every platform.
+# Without this, a Windows checkout (core.autocrlf=true, the GitHub Actions windows-latest
+# runner default) rewrites text files to CRLF, which electron-vite copies through into
+# out/renderer/index.html largely verbatim — producing a build whose app.asar differs
+# byte-for-byte from the Linux build's, which the cross-platform drift gate in release.yml
+# (e2e/drift.mjs --require-cross-platform) catches and rejects at publish time.
+* text=auto eol=lf
+
+# Binary files: never touched by line-ending normalization.
+*.png binary

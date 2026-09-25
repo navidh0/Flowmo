@@ -23,7 +23,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "electron-updater": "^6.8.9",
     "node-ical": "^0.27.2",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
@@ -40,7 +40,7 @@
     "react-dom": "^19.3.0",
     "recharts": "^3.10.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "vite": "~7.3.6",
     "vitest": "^4.1.10"
   },

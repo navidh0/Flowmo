@@ -21,7 +21,8 @@ import type {
   SubtaskUpdate,
   TaskCreate,
   TaskUpdate,
-  TimerMode
+  TimerMode,
+  Weekday
 } from '@shared/types'
 import type { TimerService } from './timer'
 import { getHotkeyFailures, probeHotkey, setHotkeysSuspended } from './hotkeys'
@@ -221,9 +222,18 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   )
 
   // ── stats ──
-  ipcMain.handle(CH.stats.summary, (_e, range: StatsRange) => statsRepo.summary(range))
-  ipcMain.handle(CH.stats.daily, (_e, range: StatsRange) => statsRepo.daily(range))
-  ipcMain.handle(CH.stats.byProject, (_e, range: StatsRange) => statsRepo.byProject(range))
+  // "This week" follows the calendar's first-day-of-week setting, read per call so a change
+  // applies on the next refresh without re-registering anything.
+  const weekStartsOn = (): Weekday => ctx.getSettings().weekStartsOn
+  ipcMain.handle(CH.stats.summary, (_e, range: StatsRange) =>
+    statsRepo.summary(range, Date.now(), weekStartsOn())
+  )
+  ipcMain.handle(CH.stats.daily, (_e, range: StatsRange) =>
+    statsRepo.daily(range, Date.now(), weekStartsOn())
+  )
+  ipcMain.handle(CH.stats.byProject, (_e, range: StatsRange) =>
+    statsRepo.byProject(range, Date.now(), weekStartsOn())
+  )
 
   // ── settings ──
   ipcMain.handle(CH.settings.get, () => ctx.getSettings())

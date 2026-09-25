@@ -4,7 +4,8 @@ import {
   DEFAULT_SETTINGS,
   PANEL_IDS,
   PANEL_MAX_WIDTH,
-  PANEL_MIN_WIDTH
+  PANEL_MIN_WIDTH,
+  WEEKDAYS
 } from '@shared/types'
 import { getDb, str, tx } from '../index'
 
@@ -49,8 +50,8 @@ function pickString(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback
 }
 
-/** Validated widening for the string unions, without an `as` cast. */
-function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+/** Validated widening for the string and number unions, without an `as` cast. */
+function pickEnum<T extends string | number>(value: unknown, allowed: readonly T[], fallback: T): T {
   for (const option of allowed) {
     if (option === value) return option
   }
@@ -153,6 +154,10 @@ export function get(): Settings {
     hotkeySkip: pickString(s.get('hotkeySkip'), d.hotkeySkip),
 
     sleepGraceMs: pickNumber(s.get('sleepGraceMs'), d.sleepGraceMs),
+
+    // pickEnum compares with ===, so a stored "1", 1.5 or 7 falls back rather than
+    // reaching the calendar as a weekday that doesn't exist.
+    weekStartsOn: pickEnum(s.get('weekStartsOn'), WEEKDAYS, d.weekStartsOn),
 
     layout: pickLayout(s.get('layout'))
   }

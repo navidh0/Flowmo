@@ -9,7 +9,7 @@
  * which is also exactly what this suite is meant to exercise.
  */
 
-import { launch, quit, makeProfile, makeReporter, sleep } from '../lib/harness.mjs'
+import { launch, quit, makeProfile, makeReporter, onMain, sleep } from '../lib/harness.mjs'
 
 /** Clicks the "Today"/"Tomorrow"/"Clear" quick button inside the task detail panel's "Due
  *  date" field — scoped by DOM structure since both the sidebar and the calendar header
@@ -34,6 +34,15 @@ async function clickDueDateQuickButton(page, label) {
   }, label)
 }
 
+/** Selects a task row by title, scrolling it into view first — belt-and-braces alongside
+ *  the window resize above, in case the row is merely scrolled out of the list's own
+ *  `overflow-y-auto`, not squeezed to zero width. */
+async function clickTaskRow(page, title) {
+  const row = page.locator(`button[data-task-row]:has-text("${title}")`)
+  await row.scrollIntoViewIfNeeded()
+  await row.click()
+}
+
 export async function run() {
   const { check, skip, results } = makeReporter('tasks')
   const profile = makeProfile('flowdo-e2e-tasks-')
@@ -43,6 +52,20 @@ export async function run() {
     const launched = await launch({ profile })
     app = launched.app
     const page = launched.page
+
+    // Give the task list + detail panel comfortable room, deliberately not relying on the
+    // default window size. `PANEL_MIN_WIDTH.main` (280, src/shared/types.ts) is narrower
+    // than the task detail panel's own fixed width (`w-[19rem]` = 304px,
+    // src/renderer/src/components/tasks/index.tsx) — a real app-side inconsistency reported
+    // in this run rather than worked around here. At the default 1040×720 window, a
+    // platform's title-bar/DPI accounting can apparently squeeze the 'main' panel enough
+    // (observed on Windows CI, not locally on Linux) that once the detail panel opens the
+    // task list column collapses to zero width: Playwright resolves the row but reports
+    // "element is not visible" forever. Resizing generously up front makes this suite
+    // robust to that platform difference, since it exists to test task CRUD, not to probe
+    // the exact width where that layout edge case bites.
+    await onMain(app, 'w.setBounds({ x: 0, y: 0, width: 1600, height: 900 })')
+    await sleep(300)
 
     await page.click('[aria-label="Focus"]')
     await sleep(400)
@@ -74,7 +97,7 @@ export async function run() {
     await addTask('Task due tomorrow')
     await addTask('Task to delete')
 
-    await page.click('button[data-task-row]:has-text("Task due today")')
+    await clickTaskRow(page, 'Task due today')
     await sleep(300)
     let ok = await clickDueDateQuickButton(page, 'Today')
     await sleep(400)
@@ -92,7 +115,7 @@ export async function run() {
     const subtaskVisible = await page.isVisible('text=A subtask')
     check('subtask created via the UI', subtaskVisible)
 
-    await page.click('button[data-task-row]:has-text("Task due tomorrow")')
+    await clickTaskRow(page, 'Task due tomorrow')
     await sleep(300)
     ok = await clickDueDateQuickButton(page, 'Tomorrow')
     await sleep(400)
@@ -146,7 +169,7 @@ export async function run() {
     // ── Delete a task via the UI ──────────────────────────────────────────────
     await page.click('text=E2E Project')
     await sleep(400)
-    await page.click('button[data-task-row]:has-text("Task to delete")')
+    await clickTaskRow(page, 'Task to delete')
     await sleep(300)
     await page.click('button:has-text("Delete task")')
     await sleep(200)

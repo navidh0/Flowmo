@@ -87,7 +87,11 @@ export async function run(ctx = {}) {
     const dragged = { x: workArea.x + 24, y: workArea.y + 24 }
     await app.evaluate(
       ({ BrowserWindow }, pos) => {
-        const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('mini'))
+        // Same destroyed-window race as harness.mjs's windowsInfo/onMain: filter alive
+        // windows before touching webContents, all inside this one synchronous callback.
+        const w = BrowserWindow.getAllWindows()
+          .filter((x) => !x.isDestroyed() && !x.webContents.isDestroyed())
+          .find((x) => x.webContents.getURL().includes('mini'))
         w?.setPosition(pos.x, pos.y)
       },
       dragged

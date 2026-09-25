@@ -7,7 +7,7 @@
  */
 
 import { join } from 'node:path'
-import { BrowserWindow, screen, shell } from 'electron'
+import { BrowserWindow, nativeTheme, screen, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 
 let mainWindow: BrowserWindow | null = null
@@ -18,6 +18,25 @@ export interface WindowBounds {
   y: number
   width: number
   height: number
+}
+
+/**
+ * What a window paints before its renderer's first frame. Each value must equal
+ * `--color-surface` for that scheme in `assets/index.css` (tests/theme-surface.test.ts
+ * checks), or every new window flashes the other theme's colour on open.
+ */
+const SURFACE = { dark: '#0f1115', light: '#f6f7f9' } as const
+
+/** The pre-paint colour for the scheme in effect: `nativeTheme` already resolves 'system'. */
+export function themeBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? SURFACE.dark : SURFACE.light
+}
+
+/** Repaint open windows after the effective scheme changed (setting or OS). */
+export function applyThemeBackground(): void {
+  for (const win of [mainWindow, miniWindow]) {
+    if (win && !win.isDestroyed()) win.setBackgroundColor(themeBackground())
+  }
 }
 
 const DEFAULT_SIZE = { width: 1040, height: 720 }
@@ -118,7 +137,7 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     minHeight: MIN_SIZE.height,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#0f1115',
+    backgroundColor: themeBackground(),
     title: 'Flowdo',
     webPreferences: {
       preload,
@@ -284,7 +303,7 @@ export function setMiniWidget(visible: boolean): void {
     alwaysOnTop: true,
     skipTaskbar: true,
     transparent: false,
-    backgroundColor: '#0f1115',
+    backgroundColor: themeBackground(),
     title: 'Flowdo',
     webPreferences: {
       preload,

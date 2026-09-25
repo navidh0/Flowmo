@@ -7,7 +7,7 @@
  * only this file has to be read to understand how the app is assembled.
  */
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { EV } from '@shared/channels'
 import type { PhaseEndEvent, Settings, TimerState } from '@shared/types'
@@ -30,6 +30,7 @@ import { setLinuxAutostart } from './autostart'
 // and updater.ts only touches it once it has ruled out dev, portable, deb and test builds.
 import { autoUpdater } from 'electron-updater'
 import {
+  applyThemeBackground,
   broadcast,
   configureMiniWidget,
   createMainWindow,
@@ -106,6 +107,12 @@ if (!gotLock) {
 
     getDb()
     settings = settingsRepo.get()
+
+    // Before any window exists, so the first paint and the renderer's first
+    // prefers-color-scheme read already agree with the setting. The OS switching scheme
+    // under 'system' repaints the window backgrounds; the CSS follows on its own.
+    applyTheme(settings.theme)
+    nativeTheme.on('updated', applyThemeBackground)
 
     timer = createTimerService({
       getSettings: () => settings,
@@ -365,6 +372,7 @@ function reloadAfterImport(): void {
 
   // The service mirrors `mode`; idle, this only re-arms it.
   timer.setMode(settings.mode)
+  applyTheme(settings.theme)
   reregisterHotkeys(settings)
   applyLaunchAtLogin(settings.launchAtLogin)
   updater.settingsChanged(settings)
@@ -378,6 +386,17 @@ function reloadAfterImport(): void {
   for (const win of [getMainWindow(), getMiniWindow()]) {
     if (win && !win.webContents.isDestroyed()) win.webContents.reload()
   }
+}
+
+/**
+ * The theme setting drives Chromium's `prefers-color-scheme` in every renderer (index.css
+ * switches its tokens on it) and the native chrome, so no renderer code has to know.
+ * Window backgrounds are repainted directly as well: whether setting `themeSource` emits
+ * nativeTheme's 'updated' depends on the effective scheme actually changing.
+ */
+function applyTheme(theme: Settings['theme']): void {
+  nativeTheme.themeSource = theme
+  applyThemeBackground()
 }
 
 /**
@@ -427,6 +446,8 @@ function applySettingsPatch(patch: Partial<Settings>): Settings {
   if (patch.launchAtLogin !== undefined) {
     applyLaunchAtLogin(settings.launchAtLogin)
   }
+
+  if (patch.theme !== undefined) applyTheme(settings.theme)
 
   if (patch.showMiniWidget !== undefined) {
     // The user chose explicitly (settings, tray or IPC), so an auto-opened widget is theirs now.

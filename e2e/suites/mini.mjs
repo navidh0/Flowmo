@@ -1,0 +1,118 @@
+/**
+ * mini — everything e2e/smoke.mjs checked (close-to-tray corner placement, always-on-top,
+ * minimize/restore, pin/unpin), plus: a dragged position persists across a restart on the
+ * same profile.
+ */
+
+import {
+  launch,
+  quit,
+  makeProfile,
+  makeReporter,
+  getMini,
+  getMiniPage,
+  getWorkArea,
+  onMain,
+  outDir,
+  sleep,
+  waitFor
+} from '../lib/harness.mjs'
+import { join } from 'node:path'
+
+export async function run(ctx = {}) {
+  const { check, skip, results } = makeReporter('mini')
+  const checkMinimize = ctx.checkMinimize !== false
+  const profile = makeProfile('flowdo-e2e-mini-')
+
+  let app
+  try {
+    let launched = await launch({ profile })
+    app = launched.app
+    let page = launched.page
+    const workArea = await getWorkArea(app)
+
+    check('no mini widget at start', (await getMini(app)) === null)
+
+    await onMain(app, 'w.close()') // minimizeToTray defaults on: hides, does not quit
+    let shown = await waitFor(() => getMini(app))
+    check('close-to-tray opens the mini widget', !!shown)
+
+    if (shown) {
+      const b = shown.bounds
+      const right = workArea.x + workArea.width - (b.x + b.width)
+      const bottom = workArea.y + workArea.height - (b.y + b.height)
+      check(
+        'widget sits in the bottom-right corner',
+        right >= 0 && right <= 40 && bottom >= 0 && bottom <= 40,
+        JSON.stringify({ right, bottom })
+      )
+      check('widget is always on top', shown.onTop)
+      const miniPage = getMiniPage(app)
+      if (miniPage) await miniPage.screenshot({ path: join(outDir, 'mini-widget.png') })
+    }
+
+    await onMain(app, 'w.show()')
+    check('showing the window closes it again', !!(await waitFor(async () => (await getMini(app)) === null)))
+
+    if (checkMinimize) {
+      await onMain(app, 'w.minimize()')
+      check('minimize opens the mini widget', !!(await waitFor(() => getMini(app))))
+      await onMain(app, 'w.restore()')
+      check('restore closes it again', !!(await waitFor(async () => (await getMini(app)) === null)))
+
+      await onMain(app, 'w.minimize()')
+      await waitFor(() => getMini(app))
+      await page.evaluate(() => window.flowdo.settings.set({ showMiniWidget: true }))
+      await onMain(app, 'w.restore()')
+      await sleep(800)
+      check('a widget pinned while auto-shown stays after restore', (await getMini(app)) !== null)
+      await page.evaluate(() => window.flowdo.settings.set({ showMiniWidget: false }))
+      check('unpinning closes it', !!(await waitFor(async () => (await getMini(app)) === null)))
+    } else {
+      skip('minimize checks', '--no-minimize')
+    }
+
+    await page.evaluate(() => window.flowdo.settings.set({ miniWidgetOnMinimize: false }))
+    await onMain(app, 'w.hide()')
+    await sleep(1000)
+    check('with the option off, leaving opens nothing', (await getMini(app)) === null)
+    await onMain(app, 'w.show()')
+    await page.evaluate(() => window.flowdo.settings.set({ miniWidgetOnMinimize: true }))
+
+    // ── Dragged position persists across a restart ────────────────────────────
+    await onMain(app, 'w.close()')
+    shown = await waitFor(() => getMini(app))
+    check('mini widget reopened to drag it', !!shown)
+
+    const dragged = { x: workArea.x + 24, y: workArea.y + 24 }
+    await app.evaluate(
+      ({ BrowserWindow }, pos) => {
+        const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('mini'))
+        w?.setPosition(pos.x, pos.y)
+      },
+      dragged
+    )
+    await sleep(700) // past the 400ms debounce in index.ts's rememberMiniPosition
+
+    await quit(app)
+
+    launched = await launch({ profile })
+    app = launched.app
+    page = launched.page
+
+    await onMain(app, 'w.close()')
+    const afterRestart = await waitFor(() => getMini(app))
+    check(
+      'dragged mini position persists across a restart',
+      !!afterRestart &&
+        Math.abs(afterRestart.bounds.x - dragged.x) <= 2 &&
+        Math.abs(afterRestart.bounds.y - dragged.y) <= 2,
+      JSON.stringify({ dragged, got: afterRestart?.bounds })
+    )
+  } finally {
+    if (app) await quit(app)
+    profile.cleanup()
+  }
+
+  return results
+}

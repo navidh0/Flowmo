@@ -1,7 +1,10 @@
-# The gate every change passes: typecheck, unit tests, a real build, and an end-to-end smoke
-# run of the built app. Windows is the shipping platform and the only one with a window
-# manager on CI, so the full smoke (including minimize) runs there; Linux runs the suite to
-# catch path-separator and locale assumptions early (v0.4 ports the app itself).
+# The gate every change passes: typecheck, unit tests, a real build, and the full end-to-end
+# suite run against every artefact the project actually ships — the unpackaged build, the
+# packaged executable, and the installed app — on both platforms, plus a packaging drift
+# check of each platform's release/ output. Both platforms now have a window manager on CI
+# (Windows always has one; Linux gets openbox under Xvfb via e2e/xvfb-wm.sh), so minimize is
+# exercised everywhere (v0.4 ports the app itself, and ships a Linux AppImage + deb alongside
+# the existing Windows NSIS installer + portable exe).
 name: CI
 
 on:
@@ -22,7 +25,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -33,18 +36,24 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: End-to-end smoke (built app, throwaway profile)
+      - name: Read app version
+        id: version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: End-to-end (unpackaged build, throwaway profile)
         run: npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-windows-unpacked
+          path: e2e/out/
+          if-no-files-found: ignore
       - name: Package installers
         run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: e2e-screenshots
-          path: e2e/out/
-          if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         with:
           name: windows-installers
@@ -56,22 +65,84 @@ jobs:
             release/*.blockmap
             release/latest.yml
           if-no-files-found: error
+      - name: Packaging drift check
+        run: node e2e/drift.mjs release
+      - name: End-to-end (packaged, win-unpacked exe)
+        run: npm run e2e -- --app release/win-unpacked/Flowdo.exe
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-windows-win-unpacked
+          path: e2e/out/
+          if-no-files-found: ignore
+      - name: Silently install the NSIS installer
+        # perMachine: false in electron-builder.yml means this is a per-user install, landing
+        # in $env:LOCALAPPDATA\Programs\Flowdo — not a machine-wide Program Files install, and
+        # not something `/S` needs admin rights for. -Wait is required: without it the e2e
+        # step below would race the installer's own background copy/shortcut steps. The
+        # variable is braced (${env:VERSION}) rather than bare ($env:VERSION.exe): in a
+        # double-quoted pwsh string a bare variable reference immediately followed by
+        # `.exe` is parsed as member access on the variable (a `.exe` property lookup),
+        # not as the variable's value followed by literal text — bracing it avoids that.
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          Start-Process -FilePath "release\Flowdo-Setup-${env:VERSION}.exe" -ArgumentList '/S' -Wait
+      - name: End-to-end (installed app)
+        shell: pwsh
+        run: npm run e2e -- --app "$env:LOCALAPPDATA\Programs\Flowdo\Flowdo.exe"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-windows-installed
+          path: e2e/out/
+          if-no-files-found: ignore
+      - name: End-to-end (portable exe) — not run
+        # electron-builder's portable target is a self-extracting launcher: the process
+        # Playwright would spawn immediately re-execs a *different*, freshly extracted
+        # Flowdo.exe as a child and exits/detaches, so `_electron.launch()` never attaches
+        # to the real app's CDP/inspector endpoint (it only ever sees the launcher). This
+        # is a structural limitation of driving a self-extracting wrapper, not something a
+        # timeout or retry fixes, so the target is skipped here rather than run against a
+        # step that would either hang or pass without ever touching the real app.
+        shell: pwsh
+        run: |
+          Write-Host 'Skipping e2e against release/Flowdo-*-portable.exe: Playwright cannot attach to the self-extracting portable launcher, only to the real Electron process it spawns as a child. See the step comment in .github/workflows/ci.yml for the full reasoning.'
 
   linux-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+      # openbox gives e2e/xvfb-wm.sh a window manager under Xvfb, so minimize behaves the
+      # same as it does on Windows; xvfb-run itself ships on the ubuntu-latest image already,
+      # but is included here too in case that image assumption ever changes.
+      - name: Install openbox (+ Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openbox xvfb
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: End-to-end smoke (Xvfb has no window manager, so no minimize)
-        run: xvfb-run -a -s "-screen 0 1500x950x24" npm run e2e -- --no-minimize
+      - name: Read app version
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: End-to-end (unpackaged build, throwaway profile)
+        run: e2e/xvfb-wm.sh npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-linux-unpacked
+          path: e2e/out/
+          if-no-files-found: ignore
       - name: Package Linux packages
         run: npx electron-builder --linux --publish never
       - uses: actions/upload-artifact@v7
@@ -81,6 +152,49 @@ jobs:
             release/*.AppImage
             release/*.deb
           if-no-files-found: error
+      - name: Packaging drift check
+        run: node e2e/drift.mjs release
+      - name: Extract the AppImage
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/appimage"
+          cp "release/Flowdo-$VERSION.AppImage" "$RUNNER_TEMP/appimage/"
+          chmod +x "$RUNNER_TEMP/appimage/Flowdo-$VERSION.AppImage"
+          ( cd "$RUNNER_TEMP/appimage" && "./Flowdo-$VERSION.AppImage" --appimage-extract )
+      - name: End-to-end (extracted AppImage)
+        run: e2e/xvfb-wm.sh npm run e2e -- --app "$RUNNER_TEMP/appimage/squashfs-root/flowdo"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-linux-appimage
+          path: e2e/out/
+          if-no-files-found: ignore
+      - name: Install the deb package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y "./release/flowdo_${VERSION}_amd64.deb"
+      - name: End-to-end (installed deb)
+        run: e2e/xvfb-wm.sh npm run e2e -- --app /opt/Flowdo/flowdo
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-linux-deb-installed
+          path: e2e/out/
+          if-no-files-found: ignore
+      - name: Remove the deb package
+        run: sudo apt-get remove -y flowdo
+      - name: Assert the deb really uninstalled (/opt/Flowdo gone)
+        run: |
+          set -euo pipefail
+          if [ -d /opt/Flowdo ]; then
+            echo "::error::/opt/Flowdo still exists after apt-get remove -y flowdo"
+            exit 1
+          fi
 
   # Fast, dependency-light checks that don't need a Windows/Linux build+e2e round trip:
   # the project's own mechanical invariants (scripts/sweep.mjs) and a production-dependency

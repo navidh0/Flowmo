@@ -415,7 +415,10 @@ function checkCrossPlatform(allDirs, check, skip, requireCrossPlatform) {
   const referenceSet = new Set(referenceFiles)
 
   let firstListDiff = null
-  let firstContentDiff = null
+  // Every differing path, not just the first — a single run should show the whole picture
+  // (e.g. every file line-ending normalization missed), capped for a readable report.
+  const contentDiffs = []
+  const CONTENT_DIFF_DISPLAY_CAP = 25
 
   for (const other of others) {
     const otherFiles = asar.listPackage(other.asarPath).sort()
@@ -430,7 +433,7 @@ function checkCrossPlatform(allDirs, check, skip, requireCrossPlatform) {
       }
     }
 
-    if (!firstContentDiff) {
+    if (contentDiffs.length === 0) {
       for (const f of referenceFiles) {
         if (!otherSet.has(f)) continue // already surfaced as a list diff above
         // listPackage()'s paths are asar-root-absolute ("/node_modules/..."); passing that
@@ -447,23 +450,32 @@ function checkCrossPlatform(allDirs, check, skip, requireCrossPlatform) {
           // Directories and symlinks list like files but can't be extracted — they're
           // already covered by the file-list comparison above, so skip rather than FAIL.
           if (/found a directory or link/.test(String(err))) continue
-          firstContentDiff = `${f}: could not extract from both asars — ${err}`
-          break
+          contentDiffs.push(`${f}: could not extract from both asars — ${err}`)
+          continue
         }
         if (!a.equals(b)) {
           const hashA = createHash('sha256').update(a).digest('hex')
           const hashB = createHash('sha256').update(b).digest('hex')
-          firstContentDiff = `${f} differs: ${reference.dir} is ${hashA.slice(0, 12)}, ${other.dir} is ${hashB.slice(0, 12)}`
-          break
+          contentDiffs.push(`${f} differs: ${reference.dir} is ${hashA.slice(0, 12)}, ${other.dir} is ${hashB.slice(0, 12)}`)
         }
       }
     }
 
-    if (firstListDiff && firstContentDiff) break
+    if (firstListDiff && contentDiffs.length > 0) break
   }
 
+  const contentDetail = contentDiffs.length
+    ? (() => {
+        const shown = contentDiffs.slice(0, CONTENT_DIFF_DISPLAY_CAP)
+        const rest = contentDiffs.length - shown.length
+        const lines = shown.map((d) => `    ${d}`)
+        if (rest > 0) lines.push(`    … and ${rest} more`)
+        return `${contentDiffs.length} file(s) differ:\n${lines.join('\n')}`
+      })()
+    : ''
+
   check('app.asar file list is identical across platforms', !firstListDiff, firstListDiff ?? '')
-  check('app.asar file contents are identical across platforms', !firstContentDiff, firstContentDiff ?? '')
+  check('app.asar file contents are identical across platforms', contentDiffs.length === 0, contentDetail)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

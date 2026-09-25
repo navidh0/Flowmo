@@ -66,20 +66,32 @@ async function main() {
     check('runs against the throwaway profile', resolve(userData) === resolve(profile), userData)
 
     // Main-process helpers. Windows are told apart by the mini widget's #/mini route.
+    //
+    // The mini widget opens/closes on a timer main owns, so a window can be mid-teardown —
+    // still in getAllWindows(), but its webContents already destroyed — at the exact moment
+    // one of these runs; touching it then throws "Object has been destroyed". The alive
+    // check and the field reads/find() it guards are one synchronous expression inside one
+    // evaluate() call each, so nothing can destroy a window BETWEEN the check and the touch —
+    // only a window already destroyed when the callback starts can slip through, and the
+    // filter excludes exactly that one.
     const windows = () =>
       app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().map((w) => ({
-          mini: w.webContents.getURL().includes('mini'),
-          visible: w.isVisible(),
-          minimized: w.isMinimized(),
-          bounds: w.getBounds(),
-          onTop: w.isAlwaysOnTop()
-        }))
+        BrowserWindow.getAllWindows()
+          .filter((w) => !w.isDestroyed() && !w.webContents.isDestroyed())
+          .map((w) => ({
+            mini: w.webContents.getURL().includes('mini'),
+            visible: w.isVisible(),
+            minimized: w.isMinimized(),
+            bounds: w.getBounds(),
+            onTop: w.isAlwaysOnTop()
+          }))
       )
     const mini = async () => (await windows()).find((w) => w.mini && w.visible) ?? null
     const onMain = (fn) =>
       app.evaluate(({ BrowserWindow }, body) => {
-        const w = BrowserWindow.getAllWindows().find((x) => !x.webContents.getURL().includes('mini'))
+        const w = BrowserWindow.getAllWindows()
+          .filter((x) => !x.isDestroyed() && !x.webContents.isDestroyed())
+          .find((x) => !x.webContents.getURL().includes('mini'))
         // eslint-disable-next-line no-new-func
         new Function('w', body)(w)
       }, fn)

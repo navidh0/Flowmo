@@ -88,16 +88,31 @@ export async function quit(app) {
   await app.close().catch(() => {})
 }
 
-/** Every open BrowserWindow's shape, main and mini told apart by the mini route. */
+/**
+ * Every open BrowserWindow's shape, main and mini told apart by the mini route.
+ *
+ * The mini widget opens and closes on a timer main owns (miniAuto, close-to-tray, restart),
+ * so a window can be mid-teardown — still in `getAllWindows()`, but its `webContents`
+ * already destroyed — at the exact moment this runs; touching it then throws "Object has
+ * been destroyed" (Electron), which crashed a poll loop under CI's timing before this
+ * filter. `.filter().map()` is one synchronous expression inside one `evaluate()` call, so
+ * nothing can destroy a window BETWEEN the aliveness check and the field reads below it —
+ * only a window already destroyed (or destroying) when this callback starts can slip
+ * through, and the filter is exactly what excludes it. A filtered-out (destroyed) window is
+ * correctly absent from the result, so a caller polling for "the mini widget is gone" sees
+ * that the moment it starts destructing, not only once 'closed' fully finishes.
+ */
 export function windowsInfo(app) {
   return app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows().map((w) => ({
-      mini: w.webContents.getURL().includes('mini'),
-      visible: w.isVisible(),
-      minimized: w.isMinimized(),
-      bounds: w.getBounds(),
-      onTop: w.isAlwaysOnTop()
-    }))
+    BrowserWindow.getAllWindows()
+      .filter((w) => !w.isDestroyed() && !w.webContents.isDestroyed())
+      .map((w) => ({
+        mini: w.webContents.getURL().includes('mini'),
+        visible: w.isVisible(),
+        minimized: w.isMinimized(),
+        bounds: w.getBounds(),
+        onTop: w.isAlwaysOnTop()
+      }))
   )
 }
 
@@ -105,10 +120,21 @@ export async function getMini(app) {
   return (await windowsInfo(app)).find((w) => w.mini && w.visible) ?? null
 }
 
-/** Run `fnBody` (a function body string, receiving `w`) against the main (non-mini) window. */
+/**
+ * Run `fnBody` (a function body string, receiving `w`) against the main (non-mini) window.
+ *
+ * Same destroyed-window race as `windowsInfo` above: the alive-check and the `find()` it
+ * guards are one synchronous expression, so a window destroyed BEFORE this callback starts
+ * is excluded (never touched), and nothing can destroy one mid-expression. `w` can still be
+ * `undefined` if the main window itself is gone (e.g. after `app.quit()`); callers that
+ * might run this after quitting need to tolerate that themselves — this only guards against
+ * touching a destroyed OTHER window (the mini widget) while looking for the main one.
+ */
 export function onMain(app, fnBody) {
   return app.evaluate(({ BrowserWindow }, body) => {
-    const w = BrowserWindow.getAllWindows().find((x) => !x.webContents.getURL().includes('mini'))
+    const w = BrowserWindow.getAllWindows()
+      .filter((x) => !x.isDestroyed() && !x.webContents.isDestroyed())
+      .find((x) => !x.webContents.getURL().includes('mini'))
     // eslint-disable-next-line no-new-func
     new Function('w', body)(w)
   }, fnBody)

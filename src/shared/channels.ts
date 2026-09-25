@@ -80,6 +80,11 @@ export const CH = {
   calendar: {
     eventsRange: 'calendar:eventsRange'
   },
+  updates: {
+    check: 'updates:check',
+    getStatus: 'updates:getStatus',
+    installNow: 'updates:installNow'
+  },
   app: {
     getVersion: 'app:getVersion',
     setMiniWidget: 'app:setMiniWidget',
@@ -95,5 +100,6 @@ export const EV = {
   settingsChanged: 'ev:settings:changed',
   hotkeyFailures: 'ev:system:hotkeyFailures',
   todoistStatus: 'ev:todoist:status',
+  updateStatus: 'ev:updates:status',
   dataChanged: 'ev:data:changed'
 } as const

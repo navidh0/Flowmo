@@ -149,6 +149,7 @@ export function get(): Settings {
     launchAtLogin: pickBoolean(s.get('launchAtLogin'), d.launchAtLogin),
     showMiniWidget: pickBoolean(s.get('showMiniWidget'), d.showMiniWidget),
     miniWidgetOnMinimize: pickBoolean(s.get('miniWidgetOnMinimize'), d.miniWidgetOnMinimize),
+    autoUpdate: pickBoolean(s.get('autoUpdate'), d.autoUpdate),
     theme: pickEnum(s.get('theme'), THEMES, d.theme),
 
     hotkeyStartPause: pickString(s.get('hotkeyStartPause'), d.hotkeyStartPause),

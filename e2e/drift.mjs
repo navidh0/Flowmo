@@ -2,20 +2,35 @@
 /**
  * Packaging drift checker.
  *
- * Usage: node e2e/drift.mjs <release-dir> [<release-dir> ...]
+ * Usage: node e2e/drift.mjs [--require-cross-platform] <release-dir> [<release-dir> ...]
  *
  * For each release dir given (a local `release/` or a CI-downloaded artefact dir), checks
  * whatever artefacts are present and SKIPs whatever isn't — see the module's suite of
  * `check*` functions below for exactly what. Same PASS/FAIL/SKIP output style as e2e/run.mjs,
  * exits 1 on any FAIL.
+ *
+ * The cross-platform app.asar comparison (see its own comment below) SKIPs rather than FAILs
+ * when fewer than two dirs provide an asar to compare — normal for ci.yml, which only ever
+ * has one platform's build on hand. Pass --require-cross-platform (release.yml does) to turn
+ * that into a FAIL instead, for the one place both platforms' real release artefacts are
+ * actually available side by side and the comparison has no excuse not to run.
  */
 
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { makeReporter, root } from './lib/harness.mjs'
 
 const require = createRequire(import.meta.url)
@@ -267,10 +282,23 @@ function checkAppImage(dir, files, pkgVersion, check, skip) {
 
   const workDir = mkdtempSync(join(tmpdir(), 'flowdo-drift-appimage-'))
   try {
+    // actions/upload-artifact + actions/download-artifact do not preserve the executable
+    // bit, so a downloaded AppImage often isn't +x — and even when it already is, this
+    // check has no business running the release artefact in place. Copy it into our own
+    // scratch dir, chmod the copy, and extract from there; the input file itself is never
+    // executed or mutated. APPIMAGE_EXTRACT_AND_RUN is explicitly unset (not just left
+    // empty) so `--appimage-extract` actually just extracts rather than extract-and-run —
+    // it needs no FUSE either way.
+    const copyPath = join(workDir, appImageName)
+    copyFileSync(appImagePath, copyPath)
+    chmodSync(copyPath, 0o755)
+
+    const extractEnv = { ...process.env }
+    delete extractEnv.APPIMAGE_EXTRACT_AND_RUN
     try {
-      execFileSync(appImagePath, ['--appimage-extract'], {
+      execFileSync(copyPath, ['--appimage-extract'], {
         cwd: workDir,
-        env: { ...process.env, APPIMAGE_EXTRACT_AND_RUN: '' }
+        env: extractEnv
       })
     } catch (err) {
       check('AppImage --appimage-extract runs', false, String(err))
@@ -320,74 +348,132 @@ function checkAppImage(dir, files, pkgVersion, check, skip) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cross-platform: only when both a Windows and a Linux unpacked build are present.
+// Cross-platform: compares the app.asar shipped by every given release dir that has one.
+//
+// An asar is found in a dir either as `<something>-unpacked/resources/app.asar` (a local
+// `release/` produced by `electron-builder --dir`-style unpacked output, e.g. ci.yml, which
+// runs drift against a single platform's own `release/` where win-unpacked or
+// linux-unpacked already sits) or as `app-*.asar` directly in the dir (release.yml's
+// build-windows/build-linux jobs copy `resources/app.asar` out to `app-win.asar` /
+// `app-linux.asar` specifically so this check has something to compare once the artefact
+// only ever carries installers, never an unpacked tree).
+//
+// Note there's no Electron-version half to this check: the only way to read the Electron
+// version a packaged build embeds is to execute that platform's binary, and a Linux runner
+// can't execute a Windows one (nor the reverse) — so it can never be verified cross-platform
+// here. Both platforms are built from the same devDependencies.electron in package-lock.json
+// already, which is what actually pins that parity; this check is named for only the half it
+// can actually verify.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function findUnpacked(dirs) {
-  let win = null
-  let linux = null
-  for (const dir of dirs) {
-    if (basename(dir) === 'win-unpacked') win = dir
-    if (basename(dir) === 'linux-unpacked') linux = dir
-    const w = join(dir, 'win-unpacked')
-    const l = join(dir, 'linux-unpacked')
-    if (!win && existsSync(w)) win = w
-    if (!linux && existsSync(l)) linux = l
+function findAsarInDir(dir) {
+  if (!existsSync(dir)) return null
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return null
   }
-  return { win, linux }
-}
-
-function checkCrossPlatform(allDirs, check, skip) {
-  const { win, linux } = findUnpacked(allDirs)
-  if (!win || !linux) {
-    skip('cross-platform app.asar / electron version parity', 'need both win-unpacked and linux-unpacked to compare')
-    return
-  }
-
-  const winAsar = join(win, 'resources', 'app.asar')
-  const linuxAsar = join(linux, 'resources', 'app.asar')
-  if (!existsSync(winAsar) || !existsSync(linuxAsar)) {
-    check('both builds ship resources/app.asar', false, JSON.stringify({ win: existsSync(winAsar), linux: existsSync(linuxAsar) }))
-  } else if (!asar) {
-    skip('app.asar file-list parity', '@electron/asar not resolvable')
-  } else {
-    const winFiles = asar.listPackage(winAsar).sort()
-    const linuxFiles = asar.listPackage(linuxAsar).sort()
-    const same = JSON.stringify(winFiles) === JSON.stringify(linuxFiles)
-    check('the same app code (app.asar file list) ships on both platforms', same, same ? '' : `win has ${winFiles.length} files, linux has ${linuxFiles.length}`)
-  }
-
-  // Electron version: only determinable by executing a binary this host can actually run.
-  let linuxElectronVersion = null
-  const linuxExe = findFileRecursive(linux, (name) => name === 'flowdo')
-  if (linuxExe && process.platform === 'linux') {
-    try {
-      linuxElectronVersion = execFileSync(linuxExe, ['--version'], {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
-      })
-        .toString('utf-8')
-        .trim()
-    } catch {
-      linuxElectronVersion = null
+  for (const entry of entries) {
+    if (entry.isDirectory() && entry.name.endsWith('-unpacked')) {
+      const p = join(dir, entry.name, 'resources', 'app.asar')
+      if (existsSync(p)) return p
     }
   }
-  if (!linuxElectronVersion) {
-    skip('electron version parity', 'could not determine the shipped Electron version by executing either binary on this host')
+  const direct = entries.find((entry) => entry.isFile() && /^app-.+\.asar$/.test(entry.name))
+  return direct ? join(dir, direct.name) : null
+}
+
+function checkCrossPlatform(allDirs, check, skip, requireCrossPlatform) {
+  const suite = 'cross-platform app.asar parity'
+  // A missing comparison is a SKIP by default (nothing to compare against yet is not a
+  // packaging defect on its own), but --require-cross-platform promotes that to a FAIL —
+  // for release.yml, where both platforms' artefacts are always expected side by side and a
+  // silent SKIP would mean the one check that exists specifically for the release never ran.
+  const cannotCompare = (detail) => {
+    if (requireCrossPlatform) check(suite, false, detail)
+    else skip(suite, detail)
+  }
+
+  const found = allDirs.map((dir) => ({ dir, asarPath: findAsarInDir(dir) })).filter((entry) => entry.asarPath)
+
+  if (found.length < 2) {
+    cannotCompare(
+      allDirs.length < 2
+        ? 'fewer than two release dirs given to compare'
+        : 'need an app.asar (as *-unpacked/resources/app.asar, or app-*.asar) in at least two release dirs to compare'
+    )
     return
   }
-  const pkgElectron = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')).devDependencies?.electron
-  skip(
-    'electron version parity (win side)',
-    `cannot execute a Windows binary on ${process.platform} — linux side reports ${linuxElectronVersion}, both are built from devDependencies.electron ${pkgElectron}`
-  )
+  if (!asar) {
+    cannotCompare('@electron/asar not resolvable')
+    return
+  }
+
+  const [reference, ...others] = found
+  const referenceFiles = asar.listPackage(reference.asarPath).sort()
+  const referenceSet = new Set(referenceFiles)
+
+  let firstListDiff = null
+  let firstContentDiff = null
+
+  for (const other of others) {
+    const otherFiles = asar.listPackage(other.asarPath).sort()
+    const otherSet = new Set(otherFiles)
+
+    if (!firstListDiff) {
+      const onlyInReference = referenceFiles.find((f) => !otherSet.has(f))
+      const onlyInOther = onlyInReference ? undefined : otherFiles.find((f) => !referenceSet.has(f))
+      const diffPath = onlyInReference ?? onlyInOther
+      if (diffPath) {
+        firstListDiff = `${diffPath} is present in ${onlyInReference ? reference.dir : other.dir} but not ${onlyInReference ? other.dir : reference.dir}`
+      }
+    }
+
+    if (!firstContentDiff) {
+      for (const f of referenceFiles) {
+        if (!otherSet.has(f)) continue // already surfaced as a list diff above
+        // listPackage()'s paths are asar-root-absolute ("/node_modules/..."); passing that
+        // leading slash straight to extractFile/statFile trips a path-splitting quirk in
+        // @electron/asar's own directory traversal (an empty leading segment from
+        // '/x'.split('/') corrupts its lookup), so it must be stripped first.
+        const relPath = f.startsWith('/') ? f.slice(1) : f
+        let a
+        let b
+        try {
+          a = asar.extractFile(reference.asarPath, relPath)
+          b = asar.extractFile(other.asarPath, relPath)
+        } catch (err) {
+          // Directories and symlinks list like files but can't be extracted — they're
+          // already covered by the file-list comparison above, so skip rather than FAIL.
+          if (/found a directory or link/.test(String(err))) continue
+          firstContentDiff = `${f}: could not extract from both asars — ${err}`
+          break
+        }
+        if (!a.equals(b)) {
+          const hashA = createHash('sha256').update(a).digest('hex')
+          const hashB = createHash('sha256').update(b).digest('hex')
+          firstContentDiff = `${f} differs: ${reference.dir} is ${hashA.slice(0, 12)}, ${other.dir} is ${hashB.slice(0, 12)}`
+          break
+        }
+      }
+    }
+
+    if (firstListDiff && firstContentDiff) break
+  }
+
+  check('app.asar file list is identical across platforms', !firstListDiff, firstListDiff ?? '')
+  check('app.asar file contents are identical across platforms', !firstContentDiff, firstContentDiff ?? '')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const dirs = process.argv.slice(2).map((d) => resolve(d))
+  const rawArgs = process.argv.slice(2)
+  const requireCrossPlatform = rawArgs.includes('--require-cross-platform')
+  const dirs = rawArgs.filter((a) => a !== '--require-cross-platform').map((d) => resolve(d))
   if (dirs.length === 0) {
-    console.error('Usage: node e2e/drift.mjs <release-dir> [<release-dir> ...]')
+    console.error('Usage: node e2e/drift.mjs [--require-cross-platform] <release-dir> [<release-dir> ...]')
     process.exit(2)
   }
 
@@ -411,7 +497,7 @@ async function main() {
   }
 
   console.log(`\n── cross-platform ──`)
-  checkCrossPlatform(dirs, check, skip)
+  checkCrossPlatform(dirs, check, skip, requireCrossPlatform)
 
   const pass = results.filter((r) => r.status === 'PASS').length
   const fail = results.filter((r) => r.status === 'FAIL').length

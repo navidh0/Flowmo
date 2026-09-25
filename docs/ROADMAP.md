@@ -109,6 +109,12 @@ itself once that gate passes. v0.4 finished the job.
   follows the window's real state.
 - A widget dragged just before quitting keeps its new position.
 
+### v0.4.2 — a close button on the widget, and the taskbar icon is back
+
+- The mini widget now has a close button (×) in its top-right corner.
+- The taskbar icon is back on Windows and now appears on Linux.
+- Runs on Electron 44.
+
 ## Next
 
 ### v0.5 — making it yours

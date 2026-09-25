@@ -194,6 +194,42 @@ export const MIGRATIONS: readonly Migration[] = [
     up(db) {
       db.exec('ALTER TABLE calendar_events ADD COLUMN tzid TEXT')
     }
+  },
+  {
+    /**
+     * Backfill: Flowmodoro focus is open-ended (plannedMs is always null for it) and by the
+     * frozen contract (PhaseEndEvent.completed in shared/types.ts) is "always true (the user
+     * chose to stop)" — it can never legitimately be logged `completed = 0`. Before the fix
+     * to src/main/timer.ts, two call sites disagreed with that contract and logged it
+     * `completed = 0` anyway: stop() (unconditionally `completed: false`) and
+     * setMode(nextMode, 'keep') ending an in-flight phase (also unconditionally
+     * `completed: false`). Both now route through timer.ts's `isPhaseComplete()` helper,
+     * which returns true for any Flowmodoro-focus phase, so neither can produce this state
+     * again.
+     *
+     * This is exact for every row already in the database: verified via
+     * `git log -p -- src/main/timer.ts` (the file was introduced whole in a single commit,
+     * 05b740f, so there is no earlier history to account for) that those were the only two
+     * `completed: false` call sites reachable for Flowmodoro focus — skip() and takeBreak()
+     * already computed `completed` correctly, and the tick-driven auto-end path
+     * (`endPhase({ completed: true, ... })`) only ever fires when `isExpired(plannedMs, …)`
+     * is true, which is never true for Flowmodoro focus since its plannedMs is null. And
+     * verified via `grep -rn "sessionsRepo.create\|INSERT INTO sessions" src/main` that the
+     * only other writer of `sessions` is dataio.ts's `applyImport()`, which is intentionally
+     * excluded below.
+     *
+     * Known limitation, not handled: `applyImport()` writes whatever `completed` value an
+     * export file contains, verbatim. This migration runs exactly once, at upgrade, so rows
+     * imported later from an export file made before this fix would bring back
+     * `completed = 0` Flowmodoro-focus rows that this backfill cannot see.
+     */
+    version: 4,
+    up(db) {
+      db.exec(
+        `UPDATE sessions SET completed = 1
+         WHERE mode = 'flowmodoro' AND kind = 'focus' AND completed = 0`
+      )
+    }
   }
 ]
 

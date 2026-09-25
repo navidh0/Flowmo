@@ -324,18 +324,27 @@ export function createTimerService(deps: TimerDeps): TimerService {
     return publish(t)
   }
 
+  /**
+   * Whether the phase in progress counts as completed, were it to end right now.
+   *
+   * Single source of truth for `stop()`, `skip()`, `takeBreak()` and `setMode()` so the four
+   * can never disagree: Pomodoro (either kind) and Flowmodoro breaks are complete only once
+   * they reach their plan; Flowmodoro focus has no plan to fall short of, so the user ending
+   * it — by any of the four, including switching mode out from under it — counts as done.
+   * Must be called before `endPhase()` mutates state.
+   */
+  function isPhaseComplete(t: number): boolean {
+    if (mode === 'flowmodoro' && kind === 'focus') return true
+    return isExpired(plannedMs, elapsedMsOf(anchor, t))
+  }
+
   function skip(): TimerState {
     const t = clock()
     // Nothing live to skip. An armed phase is cleared with stop(), not skipped — advancing
     // past an armed focus would bank a round the user never worked.
     if (kind == null || status === 'idle') return derive(t)
 
-    const elapsed = elapsedMsOf(anchor, t)
-    // Flowmodoro focus has no plan to fall short of, so the user ending it counts as done.
-    const completed =
-      (mode === 'flowmodoro' && kind === 'focus') || isExpired(plannedMs, elapsed)
-
-    endPhase({ completed, discard: false, advance: true, t })
+    endPhase({ completed: isPhaseComplete(t), discard: false, advance: true, t })
     return derive(t)
   }
 
@@ -376,7 +385,7 @@ export function createTimerService(deps: TimerDeps): TimerService {
     takeBreak() {
       const t = clock()
       if (status !== 'idle' && mode === 'flowmodoro' && kind === 'focus') {
-        endPhase({ completed: true, discard: false, advance: true, t })
+        endPhase({ completed: isPhaseComplete(t), discard: false, advance: true, t })
         return derive(t)
       }
       // Pomodoro has no earned break, so this is just "end this phase".
@@ -392,7 +401,7 @@ export function createTimerService(deps: TimerDeps): TimerService {
         goIdle()
         return publish(t)
       }
-      endPhase({ completed: false, discard, advance: false, t })
+      endPhase({ completed: isPhaseComplete(t), discard, advance: false, t })
       return derive(t)
     },
 
@@ -400,7 +409,9 @@ export function createTimerService(deps: TimerDeps): TimerService {
       const t = clock()
 
       if (status !== 'idle') {
-        endPhase({ completed: false, discard: onRunning === 'discard', advance: false, t })
+        // Same rule as stop()/skip()/takeBreak(): a running Flowmodoro focus phase is
+        // complete however it ends, including by switching mode out from under it.
+        endPhase({ completed: isPhaseComplete(t), discard: onRunning === 'discard', advance: false, t })
       } else {
         goIdle()
       }

@@ -498,7 +498,9 @@ describe('stop', () => {
     })
   })
 
-  it('logs an incomplete session when not discarding', () => {
+  it('logs a completed Flowmodoro focus session when stopped, not discarding', () => {
+    // Flowmodoro focus has no plan to fall short of — the user choosing to stop IS
+    // completing it. See PhaseEndEvent.completed in shared/types.ts.
     const h = harness(flowmodoro)
 
     h.service.start(null)
@@ -506,8 +508,49 @@ describe('stop', () => {
     h.service.stop(false)
 
     expect(h.rows).toHaveLength(1)
-    expect(at(h.rows, 0)).toMatchObject({ actualMs: 30 * MINUTE, completed: false })
+    expect(at(h.rows, 0)).toMatchObject({ actualMs: 30 * MINUTE, completed: true })
     expect(at(h.phaseEnds, 0).sessionId).toBe(1)
+    expect(at(h.phaseEnds, 0).completed).toBe(true)
+  })
+
+  it('logs an incomplete session when Pomodoro focus is stopped before its plan', () => {
+    const h = harness(pomodoro)
+
+    h.service.start(null)
+    h.advance(10 * MINUTE) // well short of the 25-minute plan
+    h.service.stop(false)
+
+    expect(h.rows).toHaveLength(1)
+    expect(at(h.rows, 0)).toMatchObject({ actualMs: 10 * MINUTE, completed: false })
+  })
+
+  it('logs a completed session when Pomodoro focus is stopped after reaching its plan', () => {
+    // stop() is called directly, with no intervening tick(), so the phase is still 'running'
+    // (not auto-ended) when it elapses — proving stop() itself, not the tick, decides this.
+    const h = harness(pomodoro)
+
+    h.service.start(null)
+    h.advance(25 * MINUTE + 5_000) // past the 25-minute plan
+    expect(h.service.getState().status).toBe('running')
+    h.service.stop(false)
+
+    // Overshoot from stopping late is capped at the plan, same as skip().
+    expect(at(h.rows, 0)).toMatchObject({ actualMs: 25 * MINUTE, completed: true })
+  })
+
+  it('leaves break completion by its own rule when stopped early', () => {
+    // Breaks always have a plannedMs, so stopping one before it elapses is still incomplete —
+    // unchanged by the Flowmodoro-focus fix.
+    const h = harness({ ...pomodoro, autoStartBreaks: false })
+
+    h.service.start(null)
+    h.advance(25 * MINUTE)
+    h.service.tick() // arms the short break
+    h.service.start()
+    h.advance(2 * MINUTE) // well short of the 5-minute break
+    h.service.stop(false)
+
+    expect(at(h.rows, 1)).toMatchObject({ kind: 'short_break', actualMs: 2 * MINUTE, completed: false })
   })
 
   it('defaults to logging', () => {
@@ -552,7 +595,9 @@ describe('stop', () => {
 })
 
 describe('setMode', () => {
-  it("logs the in-flight session with 'keep'", () => {
+  it("logs the in-flight Flowmodoro focus session as completed with 'keep'", () => {
+    // Flowmodoro focus has no plan to fall short of — switching mode out from under it ends
+    // it exactly as stop()/skip()/takeBreak() would, so it counts as completed.
     const h = harness(flowmodoro)
 
     h.service.start(null)
@@ -560,8 +605,22 @@ describe('setMode', () => {
     const state = h.service.setMode('pomodoro', 'keep')
 
     expect(h.rows).toHaveLength(1)
-    expect(at(h.rows, 0)).toMatchObject({ mode: 'flowmodoro', kind: 'focus', completed: false })
+    expect(at(h.rows, 0)).toMatchObject({ mode: 'flowmodoro', kind: 'focus', completed: true })
     expect(state).toMatchObject({ mode: 'pomodoro', status: 'idle', kind: null })
+  })
+
+  it("logs an incomplete in-flight Pomodoro focus session with 'keep'", () => {
+    // Pomodoro keeps its plan-based rule: switching mode mid-focus, short of plannedMs, is
+    // still an abandoned session.
+    const h = harness(pomodoro)
+
+    h.service.start(null)
+    h.advance(10 * MINUTE) // well short of the 25-minute plan
+    const state = h.service.setMode('flowmodoro', 'keep')
+
+    expect(h.rows).toHaveLength(1)
+    expect(at(h.rows, 0)).toMatchObject({ mode: 'pomodoro', kind: 'focus', completed: false })
+    expect(state).toMatchObject({ mode: 'flowmodoro', status: 'idle', kind: null })
   })
 
   it("drops the in-flight session with 'discard'", () => {

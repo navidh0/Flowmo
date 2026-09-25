@@ -23,14 +23,17 @@ import { destroyTray, initTray, updateTray } from './tray'
 import { disposeNotifications, initNotifications, notifyPhaseEnd } from './notifications'
 import { initHotkeys, reregisterHotkeys, unregisterHotkeys } from './hotkeys'
 import { disposePower, initPower, setFocusActive } from './power'
+import { createMiniAuto, type MiniAuto } from './miniAuto'
 import {
   broadcast,
+  configureMiniWidget,
   createMainWindow,
   getMainWindow,
   getMiniWindow,
   setMiniWidget,
   setQuitting,
   showMainWindow,
+  type Point,
   type WindowBounds
 } from './windows'
 
@@ -54,6 +57,12 @@ let lastProgress = -1
 
 /** Pending window-bounds write. Resize fires per frame; only the final rest position matters. */
 let boundsTimer: NodeJS.Timeout | null = null
+
+/** Pending mini-widget position write, debounced the same way. */
+let miniPositionTimer: NodeJS.Timeout | null = null
+
+/** Opens the mini widget while the main window is off screen. Created once settings load. */
+let miniAuto: MiniAuto
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -127,11 +136,18 @@ if (!gotLock) {
       onFailure: (failures) => broadcast(EV.hotkeyFailures, failures)
     })
 
-    createMainWindow({
-      minimizeToTray: () => settings.minimizeToTray,
-      savedBounds: settingsRepo.getWindowBounds(),
-      onBoundsChanged: rememberBounds
+    configureMiniWidget({
+      getSavedPosition: () => settingsRepo.getMiniPosition(),
+      onMoved: rememberMiniPosition
     })
+    miniAuto = createMiniAuto({
+      getSettings: () => settings,
+      isMiniOpen: () => !!getMiniWindow(),
+      openMini: () => setMiniWidget(true),
+      closeMini: () => setMiniWidget(false)
+    })
+
+    createMainWindow(mainWindowOptions())
     if (settings.showMiniWidget) setMiniWidget(true)
 
     // Started after the window exists so the first status broadcast has somewhere to land.
@@ -149,11 +165,7 @@ if (!gotLock) {
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        createMainWindow({
-          minimizeToTray: () => settings.minimizeToTray,
-          savedBounds: settingsRepo.getWindowBounds(),
-          onBoundsChanged: rememberBounds
-        })
+        createMainWindow(mainWindowOptions())
       } else {
         showMainWindow()
       }
@@ -174,6 +186,12 @@ if (!gotLock) {
       boundsTimer = null
       const win = getMainWindow()
       if (win && !win.isMinimized()) settingsRepo.setWindowBounds(win.getNormalBounds())
+    }
+    if (miniPositionTimer) {
+      clearTimeout(miniPositionTimer)
+      miniPositionTimer = null
+      const [x, y] = getMiniWindow()?.getPosition() ?? []
+      if (x !== undefined && y !== undefined) settingsRepo.setMiniPosition({ x, y })
     }
     todoist?.stop()
     calendars?.stop()
@@ -196,6 +214,26 @@ function rememberBounds(bounds: WindowBounds): void {
     boundsTimer = null
     settingsRepo.setWindowBounds(bounds)
   }, 400)
+}
+
+/** Same debounce for the mini widget, which reports every frame of a drag. */
+function rememberMiniPosition(position: Point): void {
+  if (miniPositionTimer) clearTimeout(miniPositionTimer)
+  miniPositionTimer = setTimeout(() => {
+    miniPositionTimer = null
+    settingsRepo.setMiniPosition(position)
+  }, 400)
+}
+
+/** One definition for both places the main window is created (startup and macOS activate). */
+function mainWindowOptions(): Parameters<typeof createMainWindow>[0] {
+  return {
+    minimizeToTray: () => settings.minimizeToTray,
+    savedBounds: settingsRepo.getWindowBounds(),
+    onBoundsChanged: rememberBounds,
+    onLeave: () => miniAuto.mainLeft(),
+    onReturn: () => miniAuto.mainReturned()
+  }
 }
 
 /**
@@ -279,6 +317,8 @@ function reloadAfterImport(): void {
   timer.setMode(settings.mode)
   reregisterHotkeys(settings)
   app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
+  // The imported pin decides; any auto-opened widget is re-evaluated from scratch.
+  miniAuto.pinChanged()
   if (settings.showMiniWidget !== !!getMiniWindow()) setMiniWidget(settings.showMiniWidget)
 
   broadcast(EV.settingsChanged, settings)
@@ -318,9 +358,13 @@ function applySettingsPatch(patch: Partial<Settings>): Settings {
     app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
   }
 
-  if (patch.showMiniWidget !== undefined && patch.showMiniWidget !== !!getMiniWindow()) {
-    setMiniWidget(settings.showMiniWidget)
+  if (patch.showMiniWidget !== undefined) {
+    // The user chose explicitly (settings, tray or IPC), so an auto-opened widget is theirs now.
+    miniAuto.pinChanged()
+    if (patch.showMiniWidget !== !!getMiniWindow()) setMiniWidget(settings.showMiniWidget)
   }
+
+  if (patch.miniWidgetOnMinimize === false) miniAuto.disabled()
 
   // Push to the renderer so two open windows can't show different settings.
   broadcast(EV.settingsChanged, settings)

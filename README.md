@@ -42,8 +42,9 @@ minutes spent, even though it didn't complete a round.
   rebinding: capturing a combination checks it live against what's already
   registered on your system and tells you immediately if it's taken, rather than
   saving a binding that silently never fires.
-- An always-on-top mini widget, a tray icon reflecting live state, and taskbar
-  progress.
+- An always-on-top mini widget that appears in the corner of the screen when
+  you minimize or close to the tray (drag it anywhere; it remembers), a tray
+  icon reflecting live state, and taskbar progress.
 - Global hotkeys for start/pause and skip.
 - JSON export and import. Import **replaces** the entire database — it is not a
   merge — and Flowdo writes a timestamped backup of the existing database before

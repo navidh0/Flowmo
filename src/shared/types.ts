@@ -121,7 +121,14 @@ export interface Settings {
 
   minimizeToTray: boolean
   launchAtLogin: boolean
+  /** Pinned: the mini widget stays open whatever the main window is doing. */
   showMiniWidget: boolean
+  /**
+   * Show the mini widget on its own while the main window is off screen — minimized, or
+   * closed to the tray — and put it away again when the window comes back. A widget the
+   * user pinned with `showMiniWidget` is never put away by this.
+   */
+  miniWidgetOnMinimize: boolean
   theme: 'system' | 'light' | 'dark'
 
   hotkeyStartPause: string
@@ -217,6 +224,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minimizeToTray: true,
   launchAtLogin: false,
   showMiniWidget: false,
+  miniWidgetOnMinimize: true,
   theme: 'system',
 
   // Control+Alt+Space is the obvious choice and was the original default, but it is

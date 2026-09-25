@@ -66,12 +66,16 @@ likely to change how the app gets used day to day.
   is available, Flowdo declines to store the secret rather than fall back to plain text. Tokens
   and calendar addresses never leave the main process and are never included in an export.
 
-### v0.3.1 — calendar details
+### v0.3.1 — calendar details, and a mini clock on minimize
 
 - **Weekday names on dates** — the Week heading, the Upcoming day groups, a task's due date,
   session history and the daily chart all say which day of the week a date falls on.
 - **Choose the first day of the week** in Settings, Sunday through Saturday (Monday by
   default). The Week and Month views follow it, and so does the Stats "This week" range.
+- **The mini widget appears when you minimize** — or close to the tray — sitting in the
+  bottom-right corner of the screen until you bring the window back. Drag it anywhere and it
+  remembers the spot. On by default; a Settings toggle turns it off, and pinning the widget
+  keeps it open regardless.
 
 ---
 

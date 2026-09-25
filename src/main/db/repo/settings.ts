@@ -148,6 +148,7 @@ export function get(): Settings {
     minimizeToTray: pickBoolean(s.get('minimizeToTray'), d.minimizeToTray),
     launchAtLogin: pickBoolean(s.get('launchAtLogin'), d.launchAtLogin),
     showMiniWidget: pickBoolean(s.get('showMiniWidget'), d.showMiniWidget),
+    miniWidgetOnMinimize: pickBoolean(s.get('miniWidgetOnMinimize'), d.miniWidgetOnMinimize),
     theme: pickEnum(s.get('theme'), THEMES, d.theme),
 
     hotkeyStartPause: pickString(s.get('hotkeyStartPause'), d.hotkeyStartPause),
@@ -215,6 +216,47 @@ export function setWindowBounds(bounds: StoredBounds): void {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`
     )
     .run(WINDOW_BOUNDS_KEY, JSON.stringify(bounds))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mini widget position — main-process only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where the user last dragged the mini widget. Same reasoning as `WINDOW_BOUNDS_KEY`: window
+ * geometry, of no interest to any renderer, kept outside `Settings` so it is neither
+ * broadcast nor exported. Absent until the first drag; the widget then opens in the corner.
+ */
+const MINI_POSITION_KEY = 'internal:miniPosition'
+
+export interface StoredPoint {
+  x: number
+  y: number
+}
+
+export function getMiniPosition(): StoredPoint | null {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(MINI_POSITION_KEY)
+  if (!row) return null
+
+  try {
+    const parsed: unknown = JSON.parse(str(row, 'value'))
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const p = parsed as Record<string, unknown>
+    if (typeof p.x !== 'number' || !Number.isFinite(p.x)) return null
+    if (typeof p.y !== 'number' || !Number.isFinite(p.y)) return null
+    return { x: p.x, y: p.y }
+  } catch {
+    return null
+  }
+}
+
+export function setMiniPosition(point: StoredPoint): void {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    .run(MINI_POSITION_KEY, JSON.stringify({ x: point.x, y: point.y }))
 }
 
 /**

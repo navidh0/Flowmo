@@ -66,15 +66,16 @@ likely to change how the app gets used day to day.
   is available, Flowdo declines to store the secret rather than fall back to plain text. Tokens
   and calendar addresses never leave the main process and are never included in an export.
 
+### v0.3.1 — calendar details
+
+- **Weekday names on dates** — the Week heading, the Upcoming day groups, a task's due date,
+  session history and the daily chart all say which day of the week a date falls on.
+- **Choose the first day of the week** in Settings, Sunday through Saturday (Monday by
+  default). The Week and Month views follow it, and so does the Stats "This week" range.
+
 ---
 
 ## Next
-
-### v0.3.1 — calendar details
-
-- **Weekday names everywhere the calendar shows a date.**
-- **Choose the first day of the week** in Settings (Sunday through Saturday, Monday by default);
-  the Week and Month views follow it.
 
 ### v0.4 — Linux, and a real release pipeline
 
@@ -106,6 +107,8 @@ statement covering exactly what the integrations read and where credentials live
 - **Jira**, as an additional read-only task source alongside Todoist.
 - **Google Calendar over OAuth**, for calendars that can't expose a secret iCal address (or as a
   more robust alternative to it).
+- **A move off TypeScript to Go or Rust** — most likely the main process first (timer, storage
+  and sync), with the existing test suite as the specification the port has to pass.
 
 ---
 

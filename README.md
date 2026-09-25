@@ -1,6 +1,6 @@
 # Flowdo
 
-Flowdo is a desktop time tracker for Windows that combines Pomodoro and Flowmodoro
+Flowdo is a desktop time tracker for Windows and Linux that combines Pomodoro and Flowmodoro
 timing with a task and project list, so the history of what you worked on and the
 history of how long you focused live in the same place. The timer runs in the main
 process against wall-clock timestamps rather than accumulated ticks, so it stays
@@ -45,7 +45,9 @@ minutes spent, even though it didn't complete a round.
 - An always-on-top mini widget that appears in the corner of the screen when
   you minimize or close to the tray (drag it anywhere; it remembers), a tray
   icon reflecting live state, and taskbar progress.
-- Global hotkeys for start/pause and skip.
+- Global hotkeys for start/pause and skip. Unavailable under Wayland — Flowdo says so
+  rather than accepting a binding that will never fire.
+- Launch at login, on both Windows and Linux.
 - JSON export and import. Import **replaces** the entire database — it is not a
   merge — and Flowdo writes a timestamped backup of the existing database before
   touching anything, so a bad import can be undone by restoring that backup file.
@@ -96,16 +98,42 @@ import.
 
 ## Install
 
-Download the installer from the project's GitHub Releases page and run it.
+Download a build from the project's GitHub Releases page.
 
-The installer is unsigned, so Windows SmartScreen will show a blue "Windows
-protected your PC" warning when you run it. This is expected for an app without a
-paid code-signing certificate, not a sign of tampering. To proceed, click
-**More info**, then **Run anyway**.
+**Windows:** run the installer (`Flowdo-Setup-X.Y.Z.exe`). A portable (no-install)
+build is also published alongside it.
 
-A portable (no-install) build is also published alongside the installer.
+**Linux:** an AppImage and a `.deb` are both published.
+
+```
+chmod +x Flowdo-X.Y.Z.AppImage
+./Flowdo-X.Y.Z.AppImage
+```
+
+```
+sudo apt install ./flowdo_X.Y.Z_amd64.deb
+```
+
+All of these builds are unsigned. On Windows, SmartScreen will show a blue
+"Windows protected your PC" warning when you run the installer. This is expected
+for an app without a paid code-signing certificate, not a sign of tampering. To
+proceed, click **More info**, then **Run anyway**. The AppImage and `.deb` are
+unsigned too, though most Linux setups won't warn about it.
 
 Uninstalling does not delete your data — see below.
+
+### Automatic updates
+
+The Windows installer and the Linux AppImage check for updates when Flowdo
+starts and every 6 hours after, download them in the background, and install on
+the next restart — never interrupting a running session. Settings → Updates
+shows your version and status, with a manual "Check for updates" and a toggle to
+turn automatic checking off.
+
+The portable Windows build and the `.deb` package don't update themselves;
+Settings links to the releases page for those instead. Note that 0.4.0 is the
+first version with the updater, so upgrading from 0.3.x or earlier is a one-time
+manual install — every version after that should update itself.
 
 ## Build from source
 
@@ -117,7 +145,7 @@ npm install
 npm run dev         # run in development
 npm run test        # run the test suite once
 npm run typecheck   # typecheck both the main and renderer projects
-npm run dist        # package a Windows installer into release/
+npm run dist        # package installers/packages for the current platform into release/
 ```
 
 There's no native module to rebuild against Electron's ABI — SQLite access goes
@@ -126,8 +154,13 @@ doesn't need a C++ toolchain.
 
 ## Where your data lives
 
-Flowdo stores everything in `%APPDATA%\Flowdo`, in a SQLite database file named
-`flowdo.db`. Uninstalling the app leaves this directory in place.
+| Platform | Path |
+|---|---|
+| Windows | `%APPDATA%\Flowdo` |
+| Linux | `~/.config/Flowdo` |
+
+Flowdo stores everything there in a SQLite database file named `flowdo.db`.
+Uninstalling the app leaves this directory in place.
 
 Running an import writes a timestamped backup of `flowdo.db` into the same
 directory (`flowdo-backup-<date>_<time>.db`) before replacing the data, so the
@@ -135,5 +168,5 @@ pre-import state is always recoverable.
 
 ## Roadmap
 
-See `docs/ROADMAP.md` for the full plan. In progress: Todoist and Google
-Calendar integrations, and a day timeline.
+See `docs/ROADMAP.md` for the full plan. Next up: a light theme and layout
+options, then more control over deleting your data.

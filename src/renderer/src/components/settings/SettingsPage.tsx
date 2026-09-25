@@ -14,6 +14,7 @@ import { useCallback, useState } from 'react'
 import type { Settings } from '@shared/types'
 import { useTimerStore } from '@renderer/stores/timer'
 import { BehaviorSection } from './sections/BehaviorSection'
+import { CalendarSection } from './sections/CalendarSection'
 import { DataSection } from './sections/DataSection'
 import { FlowmodoroSection } from './sections/FlowmodoroSection'
 import { HotkeysSection } from './sections/HotkeysSection'
@@ -54,6 +55,7 @@ export default function SettingsPage(): React.JSX.Element {
         <BehaviorSection settings={settings} set={set} />
         <SystemSection settings={settings} set={set} />
         <HotkeysSection settings={settings} set={set} />
+        <CalendarSection settings={settings} set={set} />
         <IntegrationsSection />
         <LayoutSection set={set} />
         <DataSection />

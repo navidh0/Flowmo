@@ -19,13 +19,19 @@
  * (CLAUDE.md's settings module is for durable preferences, not view state), so it resets to
  * 'day' on every fresh load and is never written anywhere.
  *
+ * `weekStartsOn` is the opposite: it mirrors `Settings.weekStartsOn`, a durable preference
+ * that lives in `stores/timer.ts`. This store never imports the timer store (see CLAUDE.md
+ * ownership — timeline stays independent of it); instead `TimelinePage` reads the setting
+ * and pushes it in via `setWeekStartsOn`, which reloads the current range on a real change
+ * so Week/Month always fetch exactly what they render.
+ *
  * Mirrors `stores/stats.ts`'s generation-counter pattern so a range change or a refresh that
  * starts after a newer one cannot resolve fetch handlers set the store back a step.
  */
 
 import { create } from 'zustand'
 import { CALENDAR_CACHE_DAYS } from '@shared/types'
-import type { CalendarEvent, CalendarFeed, FlowdoApi, Project, Session, TaskWithStats } from '@shared/types'
+import type { CalendarEvent, CalendarFeed, FlowdoApi, Project, Session, TaskWithStats, Weekday } from '@shared/types'
 import { type DayBounds } from '../components/timeline/layout'
 import { calendarWindowNote, shiftView, viewRangeBounds, type ViewMode } from '../components/timeline/views'
 
@@ -53,8 +59,12 @@ function messageOf(error: unknown): string {
 export interface TimelineState {
   view: ViewMode
   /** Any instant within the range currently shown; the range itself is derived from it via
-   *  `viewRangeBounds(view, anchorMs)`. */
+   *  `viewRangeBounds(view, anchorMs, weekStartsOn)`. */
   anchorMs: number
+  /** Mirrors `Settings.weekStartsOn` — see the module doc comment. Defaults to Monday
+   *  (matching `DEFAULT_SETTINGS.weekStartsOn`) until `TimelinePage` pushes the real value
+   *  in. */
+  weekStartsOn: Weekday
   sessions: Session[]
   calendarEvents: CalendarEvent[]
   /** Non-null when `calendar.eventsRange` failed outright, OR when the visible range lies
@@ -85,6 +95,9 @@ export interface TimelineActions {
   goPrev: () => Promise<void>
   goNext: () => Promise<void>
   refresh: () => Promise<void>
+  /** Pushed in by `TimelinePage` from `Settings.weekStartsOn`. No-op if unchanged; otherwise
+   *  reloads the current view/anchor so Week/Month re-fetch the range that now applies. */
+  setWeekStartsOn: (weekStartsOn: Weekday) => Promise<void>
   clearError: () => void
   /** Cached lookup of a task's title for the hover card; fetches once per id. */
   getTaskTitle: (taskId: number) => string | null
@@ -95,6 +108,7 @@ export type TimelineStore = TimelineState & TimelineActions
 const INITIAL: TimelineState = {
   view: 'day',
   anchorMs: Date.now(),
+  weekStartsOn: 1, // DEFAULT_SETTINGS.weekStartsOn — real value arrives via setWeekStartsOn
   sessions: [],
   calendarEvents: [],
   calendarNote: null,
@@ -110,6 +124,14 @@ const INITIAL: TimelineState = {
 let unsubscribers: Array<() => void> = []
 /** Bumped by dispose()/range changes so a superseded in-flight load is a no-op on arrival. */
 let generation = 0
+/** Identifies the current mount: bumped by every `init()` and every `dispose()`. An `init()`
+ *  resuming after its `waitForApi()` wait only carries on if it is still the latest mount.
+ *  Separate from `generation` on purpose — a range or week-start change during that wait
+ *  bumps `generation` (so the stale fetch is dropped) but must NOT stop this mount from
+ *  registering its subscriptions and marking the store ready; only an unmount, or a newer
+ *  mount (StrictMode's mount→unmount→mount), may. A plain boolean can't tell those apart:
+ *  the second `init()` would reset it and let the first one register a duplicate set. */
+let mountToken = 0
 
 export const useTimelineStore = create<TimelineStore>((set, get) => {
   async function load(view: ViewMode, anchorMs: number, mine: number): Promise<void> {
@@ -118,7 +140,7 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
       set({ error: 'The app bridge is not available yet.', loading: false })
       return
     }
-    const range: DayBounds = viewRangeBounds(view, anchorMs)
+    const range: DayBounds = viewRangeBounds(view, anchorMs, get().weekStartsOn)
 
     const [sessionsResult, eventsResult, projectsResult, feedsResult] = await Promise.allSettled([
       bridge.sessions.listRange(range.start, range.end),
@@ -173,8 +195,9 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
 
     async init() {
       const mine = ++generation
+      const mount = ++mountToken
       const bridge = await waitForApi()
-      if (mine !== generation) return
+      if (mount !== mountToken) return
       if (!bridge) {
         set({ loading: false, error: 'Could not reach the app bridge.' })
         return
@@ -192,13 +215,19 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
       )
 
       set({ loading: true })
+      // `mine` may already be stale here (e.g. `setWeekStartsOn` ran while this was still
+      // waiting on the bridge and bumped `generation` again) — `load()` itself no-ops the
+      // patch it fetched in that case, since the newer call's own fetch is the authoritative
+      // one. `ready` still flips below regardless: this call is still THIS mount's init, not
+      // a superseded one, and the newer call already reads the up-to-date range via `get()`.
       await load(get().view, get().anchorMs, mine)
-      if (mine !== generation) return
+      if (mount !== mountToken) return
       set({ ready: true })
     },
 
     dispose() {
       generation += 1
+      mountToken += 1
       for (const off of unsubscribers) off()
       unsubscribers = []
       set({ ready: false })
@@ -227,6 +256,13 @@ export const useTimelineStore = create<TimelineStore>((set, get) => {
 
     async refresh() {
       const mine = generation
+      await load(get().view, get().anchorMs, mine)
+    },
+
+    async setWeekStartsOn(weekStartsOn) {
+      if (weekStartsOn === get().weekStartsOn) return
+      const mine = ++generation
+      set({ weekStartsOn, loading: true, taskTitles: new Map() })
       await load(get().view, get().anchorMs, mine)
     },
 

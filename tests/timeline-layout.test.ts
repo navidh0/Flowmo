@@ -258,6 +258,40 @@ describe('localWeekBounds', () => {
     const { start, end } = localWeekBounds(new Date(2026, 10, 1, 12).getTime())
     expect(end - start).toBe(169 * 3_600_000)
   })
+
+  it('starts on Sunday for weekStartsOn=0, local midnight, end = start + 7 local days', () => {
+    const wed = new Date(2026, 5, 17, 12).getTime() // Wed 17 June 2026
+    const { start, end } = localWeekBounds(wed, 0)
+    expect(new Date(start).getDay()).toBe(0)
+    expect(new Date(start).getHours()).toBe(0)
+    expect(start).toBe(new Date(2026, 5, 14).getTime()) // Sunday 14 June
+    expect(end).toBe(shiftLocalDay(start, 7))
+  })
+
+  it('starts on Saturday for weekStartsOn=6, local midnight, end = start + 7 local days', () => {
+    const wed = new Date(2026, 5, 17, 12).getTime() // Wed 17 June 2026
+    const { start, end } = localWeekBounds(wed, 6)
+    expect(new Date(start).getDay()).toBe(6)
+    expect(new Date(start).getHours()).toBe(0)
+    expect(start).toBe(new Date(2026, 5, 13).getTime()) // Saturday 13 June
+    expect(end).toBe(shiftLocalDay(start, 7))
+  })
+
+  it('a Sunday-start (0) week beginning exactly on the spring-forward day is 167 hours', () => {
+    // 8 March 2026 is itself a Sunday, so weekStartsOn=0 puts the transition on day 1.
+    const { start, end } = localWeekBounds(new Date(2026, 2, 8, 12).getTime(), 0)
+    expect(new Date(start).getDay()).toBe(0)
+    expect(start).toBe(new Date(2026, 2, 8).getTime())
+    expect(end - start).toBe(167 * 3_600_000)
+  })
+
+  it('a Saturday-start (6) week straddling the fall-back Sunday is 169 hours', () => {
+    // 1 November 2026 is a Sunday; its Saturday-first week is 31 Oct - 7 Nov.
+    const { start, end } = localWeekBounds(new Date(2026, 10, 1, 12).getTime(), 6)
+    expect(new Date(start).getDay()).toBe(6)
+    expect(start).toBe(new Date(2026, 9, 31).getTime())
+    expect(end - start).toBe(169 * 3_600_000)
+  })
 })
 
 describe('shiftLocalWeek', () => {
@@ -273,6 +307,20 @@ describe('weekDays', () => {
     expect(days).toHaveLength(7)
     expect(days.map((d) => new Date(d).getDay())).toEqual([1, 2, 3, 4, 5, 6, 0])
     expect(days[0]).toBe(new Date(2026, 5, 15).getTime())
+  })
+
+  it('returns 7 local midnights, Sunday through Saturday, for weekStartsOn=0', () => {
+    const days = weekDays(new Date(2026, 5, 17, 9).getTime(), 0)
+    expect(days).toHaveLength(7)
+    expect(days.map((d) => new Date(d).getDay())).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(days[0]).toBe(new Date(2026, 5, 14).getTime())
+  })
+
+  it('returns 7 local midnights, Saturday through Friday, for weekStartsOn=6', () => {
+    const days = weekDays(new Date(2026, 5, 17, 9).getTime(), 6)
+    expect(days).toHaveLength(7)
+    expect(days.map((d) => new Date(d).getDay())).toEqual([6, 0, 1, 2, 3, 4, 5])
+    expect(days[0]).toBe(new Date(2026, 5, 13).getTime())
   })
 })
 
@@ -321,6 +369,40 @@ describe('monthGrid', () => {
       for (let i = 1; i < week.length; i++) {
         expect(week[i]).toBe(shiftLocalDay(week[i - 1]!, 1))
       }
+    }
+  })
+
+  it('is 4 rows, leading with 1 Feb, when Feb 2026 (starts Sunday) uses weekStartsOn=0', () => {
+    const grid = monthGrid(new Date(2026, 1, 10).getTime(), 0)
+    expect(grid.weeks).toHaveLength(4)
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 1, 1).getTime())
+    for (const week of grid.weeks) {
+      expect(new Date(week[0]!).getDay()).toBe(0)
+    }
+  })
+
+  it('leads with 1 June when June 2026 (starts Monday) uses weekStartsOn=1', () => {
+    const grid = monthGrid(new Date(2026, 5, 10).getTime(), 1)
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 5, 1).getTime())
+    for (const week of grid.weeks) {
+      expect(new Date(week[0]!).getDay()).toBe(1)
+    }
+  })
+
+  it('leads with 1 Aug when Aug 2026 (starts Saturday) uses weekStartsOn=6', () => {
+    const grid = monthGrid(new Date(2026, 7, 10).getTime(), 6)
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 7, 1).getTime())
+    for (const week of grid.weeks) {
+      expect(new Date(week[0]!).getDay()).toBe(6)
+    }
+  })
+
+  it('leads with 26 Jan for a mismatched start: Feb 2026 (starts Sunday) with weekStartsOn=1', () => {
+    const grid = monthGrid(new Date(2026, 1, 10).getTime(), 1)
+    expect(grid.weeks).toHaveLength(5)
+    expect(grid.weeks[0]?.[0]).toBe(new Date(2026, 0, 26).getTime())
+    for (const week of grid.weeks) {
+      expect(new Date(week[0]!).getDay()).toBe(1)
     }
   })
 })

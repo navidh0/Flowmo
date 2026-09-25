@@ -46,10 +46,26 @@ export function TimelinePage(): React.JSX.Element {
   const goPrev = useTimelineStore((s) => s.goPrev)
   const goNext = useTimelineStore((s) => s.goNext)
   const refresh = useTimelineStore((s) => s.refresh)
+  const weekStartsOn = useTimelineStore((s) => s.weekStartsOn)
+  const setWeekStartsOn = useTimelineStore((s) => s.setWeekStartsOn)
 
   // Render-only: the running phase's own elapsed time comes verbatim from TimerState
   // (main-derived), never recomputed here — see CLAUDE.md.
   const timerState = useTimerStore((s) => s.state)
+  // Durable preference, owned by settings (stores/timer.ts) — pushed into the timeline
+  // store rather than read from it directly, so `stores/timeline.ts` never imports
+  // `stores/timer.ts` (see that file's doc comment).
+  const settingsWeekStartsOn = useTimerStore((s) => s.settings.weekStartsOn)
+
+  // Declared before the init/dispose effect below so it runs first on mount: both stores
+  // start at the same default (Monday) until the real setting resolves, so this is a no-op
+  // in the common case and `init()`'s own first load already reads the right value — no
+  // second fetch right after mount. If the setting is already non-default when this page
+  // (re)mounts, `setWeekStartsOn` does reload once, which `init()` below is written to
+  // tolerate correctly rather than to avoid altogether (see stores/timeline.ts).
+  useEffect(() => {
+    void setWeekStartsOn(settingsWeekStartsOn)
+  }, [settingsWeekStartsOn, setWeekStartsOn])
 
   useEffect(() => {
     void init()
@@ -66,6 +82,7 @@ export function TimelinePage(): React.JSX.Element {
         onViewChange={(v) => void setView(v)}
         anchorMs={anchorMs}
         isToday={isToday}
+        weekStartsOn={weekStartsOn}
         onPrev={() => void goPrev()}
         onNext={() => void goNext()}
         onToday={() => void goToday()}
@@ -112,6 +129,7 @@ export function TimelinePage(): React.JSX.Element {
           feedColors={feedColors}
           projects={projects}
           timerState={timerState}
+          weekStartsOn={weekStartsOn}
           onSelectDay={(dayMs) => void goToDay(dayMs)}
         />
       ) : (
@@ -121,6 +139,7 @@ export function TimelinePage(): React.JSX.Element {
           calendarEvents={calendarEvents}
           feedColors={feedColors}
           projects={projects}
+          weekStartsOn={weekStartsOn}
           onSelectDay={(dayMs) => void goToDay(dayMs)}
         />
       )}

@@ -7,9 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CalendarEvent, Session } from '../src/shared/types'
-import { localDayBounds } from '../src/renderer/src/components/timeline/layout'
+import { localDayBounds, localWeekBounds } from '../src/renderer/src/components/timeline/layout'
 import { weekDays } from '../src/renderer/src/components/timeline/layout'
-import { formatEventStart } from '../src/renderer/src/components/timeline/format'
+import { formatEventStart, formatWeekHeading } from '../src/renderer/src/components/timeline/format'
 import {
   allDayEventSpan,
   allDayEventsForDay,
@@ -104,6 +104,24 @@ describe('viewRangeBounds', () => {
     expect(start).toBe(new Date(2026, 0, 26).getTime())
     expect(end).toBe(new Date(2026, 2, 2).getTime())
   })
+
+  it('week starts on Sunday when weekStartsOn=0 is passed through', () => {
+    const anchor = new Date(2026, 5, 17, 9).getTime() // Wed 17 June 2026
+    const { start, end } = viewRangeBounds('week', anchor, 0)
+    expect(new Date(start).getDay()).toBe(0)
+    expect(start).toBe(new Date(2026, 5, 14).getTime())
+    expect(end - start).toBe(7 * 24 * 3_600_000)
+  })
+
+  it('month grid leads on Sunday when weekStartsOn=0 is passed through (Feb 2026 starts Sunday)', () => {
+    const anchor = new Date(2026, 1, 10).getTime()
+    const { start, end } = viewRangeBounds('month', anchor, 0)
+    // Feb 2026 already starts on a Sunday, so with weekStartsOn=0 the grid needs no leading
+    // days at all — start is 1 Feb itself, unlike the Monday-start case above.
+    expect(start).toBe(new Date(2026, 1, 1).getTime())
+    expect(new Date(start).getDay()).toBe(0)
+    expect(end).toBe(new Date(2026, 2, 1).getTime())
+  })
 })
 
 describe('shiftView', () => {
@@ -120,6 +138,16 @@ describe('shiftView', () => {
   it('month steps by calendar month without day-of-month rollover', () => {
     const jan31 = new Date(2026, 0, 31, 12).getTime()
     expect(shiftView('month', jan31, 1)).toBe(new Date(2026, 1, 1).getTime())
+  })
+
+  it('week steps across the fall-back transition and still lands on a Sunday-start week', () => {
+    // 25 Oct 2026 is a Sunday, one week before the fall-back day (1 Nov 2026, also a Sunday).
+    const sunday = new Date(2026, 9, 25, 12).getTime()
+    const next = shiftView('week', sunday, 1)
+    expect(new Date(next).getDay()).toBe(0)
+    const { start } = localWeekBounds(next, 0)
+    expect(new Date(start).getDay()).toBe(0)
+    expect(start).toBe(new Date(2026, 10, 1).getTime())
   })
 })
 
@@ -251,6 +279,16 @@ describe('calendarCacheBounds / calendarWindowNote', () => {
     const farFuture = localDayBounds(new Date(2028, 0, 1).getTime())
     expect(calendarWindowNote(farFuture, today, window)).not.toBeNull()
   })
+
+  it('includes a weekday name alongside the date', () => {
+    const today = new Date(2026, 5, 15, 12).getTime()
+    const farPast = localDayBounds(new Date(2025, 0, 1).getTime())
+    const note = calendarWindowNote(farPast, today, window)
+    // A weekday token reads as letters immediately followed by a comma (en-US locale style,
+    // e.g. "Thu, 1 Jan 2025") — a plain "contains letters" check would also match the month
+    // name, so this pins it to the weekday specifically.
+    expect(note).toMatch(/[A-Za-z]{2,},/)
+  })
 })
 
 describe('isViewActive', () => {
@@ -300,6 +338,38 @@ describe('formatEventStart', () => {
 
   it('shows only local time when there is no recorded zone', () => {
     expect(formatEventStart(instant, null)).toBe('07:45')
+  })
+})
+
+describe('formatWeekHeading', () => {
+  // Weekday tokens (en-US locale, matching the rest of this file's assumptions) are runs of
+  // 2+ letters — distinct from the bare numeric day, so this also fails if a weekday were
+  // silently dropped from one end but not the other.
+  const WEEKDAY_TOKEN = /[A-Za-z]{2,}/
+
+  it('includes a weekday name at both ends for a week within one month', () => {
+    const { start, end } = localWeekBounds(new Date(2026, 5, 17, 9).getTime()) // Mon 15 - Sun 21 June 2026
+    const heading = formatWeekHeading(start, end)
+    const [startLabel, endLabel] = heading.split('–').map((s) => s.trim())
+    expect(startLabel).toMatch(WEEKDAY_TOKEN)
+    expect(endLabel).toMatch(WEEKDAY_TOKEN)
+  })
+
+  it('includes a weekday name at both ends for a week crossing months', () => {
+    const start = new Date(2026, 5, 29).getTime() // Mon 29 June 2026
+    const end = new Date(2026, 6, 6).getTime() // next Mon 6 July 2026
+    const heading = formatWeekHeading(start, end)
+    const [startLabel, endLabel] = heading.split('–').map((s) => s.trim())
+    expect(startLabel).toMatch(WEEKDAY_TOKEN)
+    expect(endLabel).toMatch(WEEKDAY_TOKEN)
+  })
+
+  it('shows the year on both ends for a week crossing a year boundary', () => {
+    const start = new Date(2025, 11, 29).getTime() // Mon 29 Dec 2025
+    const end = new Date(2026, 0, 5).getTime() // next Mon 5 Jan 2026
+    const heading = formatWeekHeading(start, end)
+    expect(heading).toContain('2025')
+    expect(heading).toContain('2026')
   })
 })
 

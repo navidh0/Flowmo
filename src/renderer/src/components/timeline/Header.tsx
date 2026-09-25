@@ -1,6 +1,7 @@
 /** Prev / Today / next (stepping by the current view's own unit), the view switcher, and
  *  the visible range as a readable heading. */
 
+import type { Weekday } from '@shared/types'
 import { Button, IconButton } from '@renderer/components/timer/Button'
 import { formatDayHeading, formatMonthHeading, formatWeekHeading } from './format'
 import { ChevronLeftIcon, ChevronRightIcon } from './icons'
@@ -13,18 +14,19 @@ export interface HeaderProps {
   onViewChange: (view: ViewMode) => void
   anchorMs: number
   isToday: boolean
+  weekStartsOn: Weekday
   onPrev: () => void
   onNext: () => void
   onToday: () => void
 }
 
-function heading(view: ViewMode, anchorMs: number): string {
+function heading(view: ViewMode, anchorMs: number, weekStartsOn: Weekday): string {
   if (view === 'day') return formatDayHeading(anchorMs)
   if (view === 'week') {
-    const { start, end } = localWeekBounds(anchorMs)
+    const { start, end } = localWeekBounds(anchorMs, weekStartsOn)
     return formatWeekHeading(start, end)
   }
-  return formatMonthHeading(monthGrid(anchorMs).monthMs)
+  return formatMonthHeading(monthGrid(anchorMs, weekStartsOn).monthMs)
 }
 
 const PREV_LABEL: Record<ViewMode, string> = {
@@ -43,6 +45,7 @@ export function Header({
   onViewChange,
   anchorMs,
   isToday,
+  weekStartsOn,
   onPrev,
   onNext,
   onToday
@@ -62,7 +65,7 @@ export function Header({
       </div>
 
       <h1 className="min-w-0 flex-1 truncate text-center text-[13px] font-medium text-[var(--color-text)]">
-        {heading(view, anchorMs)}
+        {heading(view, anchorMs, weekStartsOn)}
       </h1>
 
       <ViewSwitcher value={view} onChange={onViewChange} />

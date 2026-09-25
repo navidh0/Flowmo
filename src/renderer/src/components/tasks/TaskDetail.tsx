@@ -47,6 +47,14 @@ function dayKeyOffset(days: number): string {
   return toLocalDateKey(d.getTime())
 }
 
+/** Long weekday name for a 'YYYY-MM-DD' due date, built from its parts — never by handing
+ *  the string to `new Date()`, which reads it as UTC midnight and can name the wrong day. */
+function weekdayOf(dateKey: string): string | null {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long' })
+}
+
 function Field({
   label,
   children
@@ -356,13 +364,20 @@ export function TaskDetail(): React.JSX.Element | null {
         </Field>
 
         <Field label="Due date">
-          <input
-            type="date"
-            value={task.dueDate ?? ''}
-            aria-label="Due date"
-            onChange={(e) => void updateTask(task.id, { dueDate: e.target.value || null })}
-            className={`${FIELD} [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:[filter:invert(0.75)]`}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={task.dueDate ?? ''}
+              aria-label="Due date"
+              onChange={(e) => void updateTask(task.id, { dueDate: e.target.value || null })}
+              className={`${FIELD} [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:[filter:invert(0.75)]`}
+            />
+            {task.dueDate ? (
+              <span className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
+                {weekdayOf(task.dueDate)}
+              </span>
+            ) : null}
+          </div>
           <div className="mt-1.5 flex gap-1.5">
             <Button
               size="sm"

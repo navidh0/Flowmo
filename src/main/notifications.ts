@@ -7,7 +7,7 @@
  * toast can never disagree with the session that was just written.
  */
 
-import { Notification, shell } from 'electron'
+import { Notification } from 'electron'
 import type { PhaseEndEvent, Settings } from '@shared/types'
 import { showMainWindow } from './windows'
 
@@ -43,15 +43,11 @@ export function notifyPhaseEnd(event: PhaseEndEvent, nextPlannedMs?: number | nu
   const next = nextPlannedMs === undefined ? event.nextPlannedMs : nextPlannedMs
   const { title, body } = composePhaseEnd(event, next)
 
-  if (settings.soundEnabled) {
-    // shell.beep() needs no asset. A proper chime lands in v1.0 alongside the settings
-    // toggle for it; until then this is the honest zero-dependency version.
-    shell.beep()
-  }
-
   if (!supported) return
 
-  // Always silent: the OS chime plus our beep is two sounds for one event.
+  // Always silent: the renderer's synthesised chime (lib/sounds.ts, gated on
+  // settings.soundEnabled independently of this toast) is the only sound for the event —
+  // a second, OS-level sound here would double up.
   const toast = new Notification({ title, body, silent: true })
 
   toast.on('click', () => showMainWindow())

@@ -9,6 +9,7 @@ import { MiniWidget } from './components/mini'
 import { NavBar, ResizableShell, type Screen } from './components/shell'
 import { ProjectSidebar, TasksPanel } from './components/tasks'
 import { TimerPanel } from './components/timer'
+import { initPhaseSounds } from './lib/sounds'
 import { useTasksStore } from './stores/tasks'
 import { useTimerStore, useTimerSync } from './stores/timer'
 
@@ -59,6 +60,11 @@ export default function App(): React.JSX.Element {
 
 function MainShell(): React.JSX.Element {
   useRefreshTasksOnPhaseEnd()
+
+  // Chimes play from the main window only: the mini widget loads this same bundle and
+  // receives the same phase-end event, so wiring it there too would play every chime twice.
+  // The main renderer stays alive while hidden to the tray, so it can still play then.
+  useEffect(() => initPhaseSounds(() => useTimerStore.getState().settings), [])
 
   // Which screen is open is not a setting: the app should always reopen on Focus.
   const [screen, setScreen] = useState<Screen>('focus')

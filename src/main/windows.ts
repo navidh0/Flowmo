@@ -91,6 +91,10 @@ function loadRenderer(win: BrowserWindow, hash = ''): void {
 
 export interface MainWindowOptions {
   minimizeToTray: () => boolean
+  /** The window went off screen: minimized, or hidden to the tray. May fire twice per departure. */
+  onLeave?: () => void
+  /** The window is back: restored or shown. May fire twice per return. */
+  onReturn?: () => void
   /** Last persisted bounds, if any. Ignored when they fall off every connected display. */
   savedBounds?: WindowBounds | null
   /** Called on resize/move, debounced by the caller — this fires on every drag frame. */
@@ -138,6 +142,18 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
   win.on('resize', reportBounds)
   win.on('move', reportBounds)
 
+  // Minimize and hide-to-tray are both "the window left"; restore and show are both "it came
+  // back". showMainWindow() does restore() then show(), so each side can fire twice — the
+  // listeners are idempotent (see miniAuto.ts).
+  if (opts.onLeave) {
+    win.on('minimize', opts.onLeave)
+    win.on('hide', opts.onLeave)
+  }
+  if (opts.onReturn) {
+    win.on('restore', opts.onReturn)
+    win.on('show', opts.onReturn)
+  }
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
@@ -176,10 +192,73 @@ export function getMiniWindow(): BrowserWindow | null {
   return miniWindow && !miniWindow.isDestroyed() ? miniWindow : null
 }
 
+export interface Point {
+  x: number
+  y: number
+}
+
+/** The mini widget's fixed size — the renderer's layout is built for exactly this. */
+export const MINI_SIZE = { width: 220, height: 88 }
+
+/** Gap between the widget and the work area's edge, so it doesn't sit flush on the taskbar. */
+const MINI_MARGIN = 16
+
+/**
+ * Top-left of a `size` window tucked into the bottom-right of `area`, `margin` in from both
+ * edges. `area` is a display's work area, so the taskbar is already excluded. Pure, for tests.
+ */
+export function bottomRightCorner(
+  area: WindowBounds,
+  size: { width: number; height: number },
+  margin = MINI_MARGIN
+): Point {
+  return {
+    x: Math.max(area.x, area.x + area.width - size.width - margin),
+    y: Math.max(area.y, area.y + area.height - size.height - margin)
+  }
+}
+
+export interface MiniWidgetOptions {
+  /** Where the user last dragged the widget, or null to use the corner. */
+  getSavedPosition?: () => Point | null
+  /** Called on every move frame; the caller debounces the write. */
+  onMoved?: (position: Point) => void
+}
+
+let miniOptions: MiniWidgetOptions = {}
+
+/** Wired once from index.ts, so every caller of setMiniWidget places it the same way. */
+export function configureMiniWidget(options: MiniWidgetOptions): void {
+  miniOptions = options
+}
+
+/**
+ * Where the widget opens: where the user last left it if that is still on a connected
+ * display (clamped so none of it hangs off the edge), otherwise the bottom-right corner of
+ * the display the main window is on — the screen the user is looking at.
+ */
+function miniPlacement(): Point {
+  const saved = miniOptions.getSavedPosition?.() ?? null
+  if (saved) {
+    const rect = { ...saved, ...MINI_SIZE }
+    if (isOnSomeDisplay(rect)) {
+      const fitted = clampBoundsToArea(rect, screen.getDisplayMatching(rect).workArea, MINI_SIZE)
+      return { x: fitted.x, y: fitted.y }
+    }
+  }
+
+  const main = getMainWindow()
+  const display = main
+    ? screen.getDisplayMatching(main.getNormalBounds())
+    : screen.getPrimaryDisplay()
+  return bottomRightCorner(display.workArea, MINI_SIZE)
+}
+
 /**
  * The always-on-top mini timer. Frameless and draggable (the renderer sets
  * `-webkit-app-region: drag`), skipped in the taskbar so it reads as a widget rather
- * than a second app.
+ * than a second app. Opens in the screen's bottom-right corner until the user drags it
+ * somewhere else, and remembers that spot from then on.
  */
 export function setMiniWidget(visible: boolean): void {
   if (!visible) {
@@ -193,9 +272,10 @@ export function setMiniWidget(visible: boolean): void {
     return
   }
 
+  const position = miniPlacement()
   const win = new BrowserWindow({
-    width: 220,
-    height: 88,
+    ...MINI_SIZE,
+    ...position,
     show: false,
     frame: false,
     resizable: false,
@@ -217,6 +297,10 @@ export function setMiniWidget(visible: boolean): void {
   // 'screen-saver' keeps it above full-screen apps, which is the point of a focus widget.
   win.setAlwaysOnTop(true, 'screen-saver')
   win.on('ready-to-show', () => win.showInactive())
+  win.on('move', () => {
+    const [x, y] = win.getPosition()
+    if (x !== undefined && y !== undefined) miniOptions.onMoved?.({ x, y })
+  })
   win.on('closed', () => {
     miniWindow = null
   })

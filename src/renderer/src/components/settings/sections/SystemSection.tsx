@@ -24,9 +24,15 @@ export function SystemSection({
       />
       <ToggleRow
         label="Show mini widget"
-        hint="A small always-on-top window with just the timer."
+        hint="A small always-on-top window with just the timer, kept open all the time."
         checked={settings.showMiniWidget}
         onChange={(v) => set({ showMiniWidget: v })}
+      />
+      <ToggleRow
+        label="Mini widget when minimized"
+        hint="When the main window is minimized or closed to the tray, the mini widget appears in the corner of the screen until you bring the window back. Drag it anywhere; it remembers the spot."
+        checked={settings.miniWidgetOnMinimize}
+        onChange={(v) => set({ miniWidgetOnMinimize: v })}
       />
 
       <Field label="Theme">

@@ -72,3 +72,38 @@ describe('weekStartsOn', () => {
     expect(s.weekStartsOn).toBe(1)
   })
 })
+
+describe('miniWidgetOnMinimize', () => {
+  it('defaults to on', () => {
+    expect(DEFAULT_SETTINGS.miniWidgetOnMinimize).toBe(true)
+    expect(settingsRepo.get().miniWidgetOnMinimize).toBe(true)
+  })
+
+  it('round-trips and rejects a non-boolean', () => {
+    expect(settingsRepo.set({ miniWidgetOnMinimize: false }).miniWidgetOnMinimize).toBe(false)
+    storeRaw('miniWidgetOnMinimize', '"no"')
+    expect(settingsRepo.get().miniWidgetOnMinimize).toBe(true)
+  })
+})
+
+describe('mini widget position', () => {
+  it('is null until the widget is first moved', () => {
+    expect(settingsRepo.getMiniPosition()).toBeNull()
+  })
+
+  it('round-trips, and stays out of the Settings object', () => {
+    settingsRepo.setMiniPosition({ x: -1200, y: 840 })
+    expect(settingsRepo.getMiniPosition()).toEqual({ x: -1200, y: 840 })
+    expect(Object.keys(settingsRepo.get())).not.toContain('internal:miniPosition')
+  })
+
+  it.each([
+    ['not an object', '42'],
+    ['a missing coordinate', '{"x":10}'],
+    ['a non-finite coordinate', '{"x":10,"y":null}'],
+    ['unparseable JSON', '{x:']
+  ])('reads %s as no saved position', (_label, json) => {
+    storeRaw('internal:miniPosition', json)
+    expect(settingsRepo.getMiniPosition()).toBeNull()
+  })
+})

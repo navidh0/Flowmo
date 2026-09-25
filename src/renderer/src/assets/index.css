@@ -45,7 +45,8 @@
     background: var(--color-surface);
     color: var(--color-text);
     font-family:
-      'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      'Segoe UI Variable Text', 'Segoe UI', Cantarell, Ubuntu, 'Noto Sans', system-ui,
+      -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
   }

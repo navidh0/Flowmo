@@ -24,6 +24,11 @@ import { disposeNotifications, initNotifications, notifyPhaseEnd } from './notif
 import { initHotkeys, reregisterHotkeys, unregisterHotkeys } from './hotkeys'
 import { disposePower, initPower, setFocusActive } from './power'
 import { createMiniAuto, type MiniAuto } from './miniAuto'
+import { createUpdater, type Updater } from './updater'
+import { setLinuxAutostart } from './autostart'
+// electron-updater's `autoUpdater` is a lazy getter: importing the module constructs nothing,
+// and updater.ts only touches it once it has ruled out dev, portable, deb and test builds.
+import { autoUpdater } from 'electron-updater'
 import {
   broadcast,
   configureMiniWidget,
@@ -63,6 +68,9 @@ let miniPositionTimer: NodeJS.Timeout | null = null
 
 /** Opens the mini widget while the main window is off screen. Created once settings load. */
 let miniAuto: MiniAuto
+
+/** Checks for, downloads and installs new versions. Created before IPC so handlers can reach it. */
+let updater: Updater
 
 // Test harnesses (e2e/smoke.mjs) point the app at a throwaway profile, so an automated run
 // can never open — or damage — a real database. Must precede the single-instance lock, which
@@ -108,13 +116,26 @@ if (!gotLock) {
       onDataChanged: (scope) => broadcast(EV.dataChanged, scope)
     })
 
+    updater = createUpdater({
+      getSettings: () => settings,
+      isSessionActive: () => timer.getState().status !== 'idle',
+      broadcast: (status) => broadcast(EV.updateStatus, status),
+      // Close-to-tray would otherwise swallow the quit that installs the update.
+      beforeQuitAndInstall: () => setQuitting(true),
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      env: process.env,
+      getAutoUpdater: () => autoUpdater
+    })
+
     registerIpcHandlers({
       timer,
       getSettings: () => settings,
       applySettingsPatch,
       reloadAfterImport,
       todoist,
-      calendars
+      calendars,
+      updater
     })
 
     initNotifications({ getSettings: () => settings })
@@ -156,6 +177,9 @@ if (!gotLock) {
 
     createMainWindow(mainWindowOptions())
     if (settings.showMiniWidget) setMiniWidget(true)
+
+    // After the window exists, so the first status broadcast has a renderer to reach.
+    updater.start()
 
     // Started after the window exists so the first status broadcast has somewhere to land.
     // Both are no-ops until an account or feed is connected.
@@ -200,6 +224,7 @@ if (!gotLock) {
       const [x, y] = getMiniWindow()?.getPosition() ?? []
       if (x !== undefined && y !== undefined) settingsRepo.setMiniPosition({ x, y })
     }
+    updater?.dispose()
     todoist?.stop()
     calendars?.stop()
     timer?.dispose()
@@ -323,7 +348,8 @@ function reloadAfterImport(): void {
   // The service mirrors `mode`; idle, this only re-arms it.
   timer.setMode(settings.mode)
   reregisterHotkeys(settings)
-  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
+  applyLaunchAtLogin(settings.launchAtLogin)
+  updater.settingsChanged(settings)
   // The imported pin decides; any auto-opened widget is re-evaluated from scratch.
   miniAuto.pinChanged()
   if (settings.showMiniWidget !== !!getMiniWindow()) setMiniWidget(settings.showMiniWidget)
@@ -334,6 +360,25 @@ function reloadAfterImport(): void {
   for (const win of [getMainWindow(), getMiniWindow()]) {
     if (win && !win.webContents.isDestroyed()) win.webContents.reload()
   }
+}
+
+/**
+ * Launch at login. `app.setLoginItemSettings` does nothing on Linux, so there an XDG autostart
+ * entry is written instead. Only for packaged builds: in development `process.execPath` is the
+ * bare Electron binary, and an autostart entry pointing at it would open an empty Electron.
+ */
+function applyLaunchAtLogin(enabled: boolean): void {
+  if (process.platform !== 'linux') {
+    app.setLoginItemSettings({ openAtLogin: enabled })
+    return
+  }
+  if (!app.isPackaged) return
+  setLinuxAutostart(enabled, {
+    homeDir: app.getPath('home'),
+    xdgConfigHome: process.env['XDG_CONFIG_HOME'],
+    execPath: process.execPath,
+    appImagePath: process.env['APPIMAGE']
+  })
 }
 
 function toggleStartPause(): void {
@@ -362,7 +407,7 @@ function applySettingsPatch(patch: Partial<Settings>): Settings {
   }
 
   if (patch.launchAtLogin !== undefined) {
-    app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
+    applyLaunchAtLogin(settings.launchAtLogin)
   }
 
   if (patch.showMiniWidget !== undefined) {
@@ -372,6 +417,8 @@ function applySettingsPatch(patch: Partial<Settings>): Settings {
   }
 
   if (patch.miniWidgetOnMinimize === false) miniAuto.disabled()
+
+  if (patch.autoUpdate !== undefined) updater.settingsChanged(settings)
 
   // Push to the renderer so two open windows can't show different settings.
   broadcast(EV.settingsChanged, settings)

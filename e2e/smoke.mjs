@@ -85,6 +85,14 @@ async function main() {
       }, fn)
     const workArea = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea)
 
+    // ── Updates: a test profile never self-updates, and says so ────────────────
+    const update = await main.evaluate(() => window.flowdo.updates.getStatus())
+    check(
+      'updater reports unsupported on a test profile',
+      update.state === 'unsupported' && update.reason === 'test-profile',
+      JSON.stringify(update)
+    )
+
     // ── Settings: first day of the week reaches the calendar ───────────────────
     await main.evaluate(() => window.flowdo.settings.set({ weekStartsOn: 0 }))
     await main.click('[aria-label="Calendar"]')

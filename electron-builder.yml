@@ -27,7 +27,11 @@ publish:
   releaseType: release
 
 win:
-  icon: build/icon.png
+  # A prepared .ico, not the PNG: from a PNG electron-builder generates an .ico whose every
+  # image is PNG-compressed, which the Windows shell can't read at small sizes, so the
+  # taskbar showed a blank icon. build/icon.ico keeps bitmaps below 256; regenerate it with
+  # `npx electron scripts/make-icon-ico.mjs` whenever build/icon.png changes.
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:

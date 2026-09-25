@@ -366,6 +366,90 @@ function checkAppImage(dir, files, pkgVersion, check, skip) {
 // can actually verify.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Windows exe icon: the images the shell actually reads
+//
+// 0.4.2 and 0.5.0 showed a blank taskbar icon on Windows. electron-builder had turned
+// build/icon.png into an .ico whose every image, 16x16 included, was PNG-compressed, and the
+// shell paths that load the small sizes can't read those. build/icon.ico now carries classic
+// bitmaps below 256 (scripts/make-icon-ico.mjs); this reads the icon group back out of the
+// built Flowdo.exe, so CI proves that's what rcedit actually embedded.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Minimal PE reader: the RT_GROUP_ICON's entries, each with its RT_ICON image's first bytes. */
+function readExeIcons(exePath) {
+  const buf = readFileSync(exePath)
+  const pe = buf.readUInt32LE(0x3c)
+  if (buf.toString('latin1', pe, pe + 4) !== 'PE\0\0') throw new Error('not a PE file')
+  const sections = buf.readUInt16LE(pe + 6)
+  const optSize = buf.readUInt16LE(pe + 20)
+  const opt = pe + 24
+  const dataDirs = opt + (buf.readUInt16LE(opt) === 0x20b ? 112 : 96)
+  const resRva = buf.readUInt32LE(dataDirs + 2 * 8)
+  const secTable = opt + optSize
+  const toOffset = (rva) => {
+    for (let i = 0; i < sections; i++) {
+      const s = secTable + i * 40
+      const va = buf.readUInt32LE(s + 12)
+      const size = Math.max(buf.readUInt32LE(s + 8), buf.readUInt32LE(s + 16))
+      if (rva >= va && rva < va + size) return rva - va + buf.readUInt32LE(s + 20)
+    }
+    throw new Error(`RVA ${rva} is in no section`)
+  }
+  const root = toOffset(resRva)
+  // One resource directory level: [{ id, dataOrSubdir, isDir }]
+  const entries = (dirOffset) => {
+    const count = buf.readUInt16LE(dirOffset + 12) + buf.readUInt16LE(dirOffset + 14)
+    return Array.from({ length: count }, (_, i) => {
+      const e = dirOffset + 16 + i * 8
+      const name = buf.readUInt32LE(e)
+      const target = buf.readUInt32LE(e + 4)
+      return { id: name & 0x80000000 ? null : name, isDir: !!(target & 0x80000000), at: root + (target & 0x7fffffff) }
+    })
+  }
+  // Type → name → language → data entry; the first language is all an exe icon has.
+  const leaf = (entry) => {
+    let e = entry
+    while (e.isDir) e = entries(e.at)[0]
+    return buf.subarray(toOffset(buf.readUInt32LE(e.at)), toOffset(buf.readUInt32LE(e.at)) + buf.readUInt32LE(e.at + 4))
+  }
+  const types = entries(root)
+  const groupType = types.find((t) => t.id === 14) // RT_GROUP_ICON
+  const iconType = types.find((t) => t.id === 3) // RT_ICON
+  if (!groupType || !iconType) return []
+  const group = leaf(entries(groupType.at)[0])
+  const icons = new Map(entries(iconType.at).map((e) => [e.id, e]))
+  return Array.from({ length: group.readUInt16LE(4) }, (_, i) => {
+    const g = 6 + i * 14
+    const icon = icons.get(group.readUInt16LE(g + 12))
+    const data = icon ? leaf(icon) : Buffer.alloc(0)
+    return { size: group[g] || 256, png: data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) }
+  })
+}
+
+function checkWindowsIcon(dir, check, skip) {
+  const exe = join(dir, 'win-unpacked', 'Flowdo.exe')
+  if (!existsSync(exe)) {
+    skip('Windows exe icon', 'no win-unpacked/Flowdo.exe in this release dir')
+    return
+  }
+  let icons
+  try {
+    icons = readExeIcons(exe)
+  } catch (err) {
+    check('Flowdo.exe icon resources are readable', false, String(err))
+    return
+  }
+  const sizes = icons.map((i) => i.size)
+  check('Flowdo.exe embeds an icon with the small taskbar sizes', [16, 24, 32, 48].every((s) => sizes.includes(s)), sizes.join(', '))
+  const compressedSmall = icons.filter((i) => i.size < 256 && i.png).map((i) => i.size)
+  check(
+    'Flowdo.exe icon sizes below 256 are bitmaps, not PNG (the blank-taskbar-icon bug)',
+    icons.length > 0 && compressedSmall.length === 0,
+    compressedSmall.length ? `PNG-compressed: ${compressedSmall.join(', ')}` : `${icons.length} images`
+  )
+}
+
 function findAsarInDir(dir) {
   if (!existsSync(dir)) return null
   let entries
@@ -506,6 +590,7 @@ async function main() {
     checkLatestYml(dir, files, pkgVersion, check, skip)
     checkDeb(dir, files, pkgVersion, check, skip)
     checkAppImage(dir, files, pkgVersion, check, skip)
+    checkWindowsIcon(dir, check, skip)
   }
 
   console.log(`\n── cross-platform ──`)

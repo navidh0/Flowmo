@@ -129,6 +129,8 @@ export interface Settings {
    * user pinned with `showMiniWidget` is never put away by this.
    */
   miniWidgetOnMinimize: boolean
+  /** Check for, and download, new versions in the background (installer builds only). */
+  autoUpdate: boolean
   theme: 'system' | 'light' | 'dark'
 
   hotkeyStartPause: string
@@ -225,6 +227,7 @@ export const DEFAULT_SETTINGS: Settings = {
   launchAtLogin: false,
   showMiniWidget: false,
   miniWidgetOnMinimize: true,
+  autoUpdate: true,
   theme: 'system',
 
   // Control+Alt+Space is the obvious choice and was the original default, but it is
@@ -241,6 +244,36 @@ export const DEFAULT_SETTINGS: Settings = {
 
   layout: DEFAULT_LAYOUT
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Updates
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Why this build cannot update itself — each one says so in Settings, never silently. */
+export type UpdateUnsupportedReason =
+  /** Running from source (`npm run dev` / unpackaged). */
+  | 'dev'
+  /** The portable .exe: nothing installed to replace. */
+  | 'portable'
+  /** Installed from a .deb: the package manager owns updates. */
+  | 'deb'
+  /** Running on a throwaway test profile (FLOWDO_USER_DATA_DIR). */
+  | 'test-profile'
+
+/**
+ * The updater's state, pushed on every change via `updates.onStatus`. `version` is always the
+ * NEW version where one is involved; the running one comes from `app.getVersion()`.
+ */
+export type UpdateStatus =
+  | { state: 'idle'; lastCheckedAt: number | null }
+  | { state: 'checking' }
+  | { state: 'up-to-date'; lastCheckedAt: number }
+  | { state: 'available'; version: string }
+  | { state: 'downloading'; version: string; percent: number }
+  /** Downloaded; installs on quit, or now via `installNow()` when the timer is idle. */
+  | { state: 'ready'; version: string }
+  | { state: 'unsupported'; reason: UpdateUnsupportedReason; releasesUrl: string }
+  | { state: 'error'; message: string; lastCheckedAt: number }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entities
@@ -774,6 +807,15 @@ export interface FlowdoApi {
 
   events: {
     onDataChanged(cb: (scope: DataChangedScope) => void): () => void
+  }
+
+  updates: {
+    /** Check now, whatever `Settings.autoUpdate` says. Resolves with the status reached. */
+    check(): Promise<UpdateStatus>
+    getStatus(): Promise<UpdateStatus>
+    /** Quit and install a downloaded update. Refused (rejects) while a session is running. */
+    installNow(): Promise<void>
+    onStatus(cb: (status: UpdateStatus) => void): () => void
   }
 
   app: {

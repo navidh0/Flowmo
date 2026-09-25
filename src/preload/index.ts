@@ -22,6 +22,7 @@ import type {
   ProjectUpdate,
   Settings,
   TodoistStatus,
+  UpdateStatus,
   StatsRange,
   SubtaskCreate,
   SubtaskUpdate,
@@ -151,6 +152,13 @@ const api: FlowdoApi = {
 
   events: {
     onDataChanged: (cb: (scope: DataChangedScope) => void) => subscribe(EV.dataChanged, cb)
+  },
+
+  updates: {
+    check: () => ipcRenderer.invoke(CH.updates.check),
+    getStatus: () => ipcRenderer.invoke(CH.updates.getStatus),
+    installNow: () => ipcRenderer.invoke(CH.updates.installNow),
+    onStatus: (cb: (status: UpdateStatus) => void) => subscribe(EV.updateStatus, cb)
   },
 
   app: {

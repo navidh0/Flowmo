@@ -1,0 +1,40 @@
+# Static analysis (CodeQL) for the renderer/main/preload TypeScript and any JS. Runs on every
+# PR and on push to main so findings show up before merge, plus a weekly sweep to catch newly
+# published query packs against code that hasn't otherwise changed.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays, off the hour to avoid the top-of-hour scheduling crunch.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          # No compiled build step: CodeQL extracts JS/TS directly from source rather than
+          # from a build, so this stays a static scan and never runs project scripts.
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:javascript-typescript'

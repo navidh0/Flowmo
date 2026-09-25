@@ -1,0 +1,69 @@
+# The gate every change passes: typecheck, unit tests, a real build, and an end-to-end smoke
+# run of the built app. Windows is the shipping platform and the only one with a window
+# manager on CI, so the full smoke (including minimize) runs there; Linux runs the suite to
+# catch path-separator and locale assumptions early (v0.4 ports the app itself).
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Keyed on the calling workflow too: when Release reuses this as its gate on a push to main,
+# it must not share (and cancel) the group of the ordinary CI run for that same push.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: End-to-end smoke (built app, throwaway profile)
+        run: npm run e2e
+      - name: Package installers
+        run: npx electron-builder --win --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e/out/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            release/*.exe
+          if-no-files-found: error
+
+  linux-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: End-to-end smoke (Xvfb has no window manager, so no minimize)
+        run: xvfb-run -a -s "-screen 0 1500x950x24" npm run e2e -- --no-minimize

@@ -9,6 +9,16 @@
 import { join } from 'node:path'
 import { BrowserWindow, screen, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import appIcon from '../../build/icon.png?asset'
+
+/*
+ * APP_ICON_NOTE — both windows get the app icon explicitly rather than inheriting the exe's
+ * embedded one. On Windows the taskbar button otherwise resolves its icon through the
+ * Start-menu shortcut registered for the AppUserModelId; a shortcut left behind by an older
+ * install, or none at all for the portable build, gave the blank placeholder icon. Many Linux
+ * window managers show no icon at all without it. `?asset` has electron-vite copy the file
+ * into out/ (which is what gets packaged) and hand back its runtime path.
+ */
 
 let mainWindow: BrowserWindow | null = null
 let miniWindow: BrowserWindow | null = null
@@ -120,6 +130,8 @@ export function createMainWindow(opts: MainWindowOptions): BrowserWindow {
     autoHideMenuBar: true,
     backgroundColor: '#0f1115',
     title: 'Flowdo',
+    // See APP_ICON_NOTE at the top of the file.
+    icon: appIcon,
     webPreferences: {
       preload,
       sandbox: true,
@@ -286,6 +298,8 @@ export function setMiniWidget(visible: boolean): void {
     transparent: false,
     backgroundColor: '#0f1115',
     title: 'Flowdo',
+    // See APP_ICON_NOTE at the top of the file.
+    icon: appIcon,
     webPreferences: {
       preload,
       sandbox: true,

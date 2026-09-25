@@ -9,6 +9,11 @@
  * The window is frameless, so the background must claim `-webkit-app-region: drag` or the user
  * cannot move it, and the controls must claim `no-drag` or their clicks are swallowed as the
  * start of a window drag.
+ *
+ * Frameless also means no title-bar close button, so the widget carries its own small X in the
+ * top corner, set apart from the two controls so it can't be mistaken for Dismiss. It goes
+ * through `app.setMiniWidget(false)`, the same path as the tray's toggle: that counts as the
+ * user's explicit choice, so an auto-opened widget isn't reopened until the window next leaves.
  */
 
 import type { CSSProperties } from 'react'
@@ -65,9 +70,19 @@ export function MiniWidget(): React.JSX.Element {
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface)]"
+      className="relative flex h-full w-full flex-col overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface)]"
       style={DRAG}
     >
+      <button
+        type="button"
+        aria-label="Close widget"
+        title="Close the widget"
+        onClick={() => void window.flowdo.app.setMiniWidget(false)}
+        className="absolute right-1 top-1 z-10 grid h-4 w-4 place-items-center rounded text-[var(--color-text-muted)] opacity-60 outline-none transition-opacity hover:bg-[var(--color-surface-raised)] hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-[var(--color-text-muted)]"
+        style={NO_DRAG}
+      >
+        <XIcon className="h-2.5 w-2.5" />
+      </button>
       <div className="flex flex-1 items-center gap-2 px-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">

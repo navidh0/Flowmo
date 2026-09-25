@@ -79,6 +79,20 @@ export async function run(ctx = {}) {
     await onMain(app, 'w.show()')
     await page.evaluate(() => window.flowdo.settings.set({ miniWidgetOnMinimize: true }))
 
+    // ── The widget's own close button ─────────────────────────────────────────
+    await onMain(app, 'w.close()')
+    shown = await waitFor(() => getMini(app))
+    const closeable = getMiniPage(app)
+    check('mini widget opened to test its close button', !!shown && !!closeable)
+    if (closeable) {
+      await closeable.click('[aria-label="Close widget"]')
+      check('the close button closes the widget', !!(await waitFor(async () => (await getMini(app)) === null)))
+      await sleep(1000)
+      check('it stays closed while the window is still away', (await getMini(app)) === null)
+    }
+    await onMain(app, 'w.show()')
+    await sleep(400)
+
     // ── Dragged position persists across a restart ────────────────────────────
     await onMain(app, 'w.close()')
     shown = await waitFor(() => getMini(app))

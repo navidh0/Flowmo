@@ -21,19 +21,59 @@ import { MIGRATIONS, runMigrations } from '../src/main/db/migrations'
 let dir: string
 let db: DatabaseSync | null = null
 
+/**
+ * Every `DatabaseSync` this test opened via `openDb()`, so `afterEach` can verify none of
+ * them are still open — deterministically, not by trusting GC to have finalized anything.
+ * A file-level lock on Windows is tied to the real close of the native connection, and a
+ * lingering `StatementSync`/`DatabaseSync` reference only releases that lock once it is
+ * garbage-collected; leaving that to chance is exactly what makes a leak show up as an
+ * intermittent stall in whichever *later* test's `openDb()`/`runMigrations()` next touches
+ * a file, rather than a deterministic failure in the test that actually leaked it.
+ */
+let openHandles: DatabaseSync[] = []
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'flowdo-migrations-test-'))
+  openHandles = []
 })
 
 afterEach(() => {
   db?.close()
   db = null
+
+  const leaked = openHandles.filter((h) => h.isOpen)
+  openHandles = []
+  // Remove the temp dir regardless of the check below — an actually-still-open handle would
+  // make this fail on Windows too (the file is locked), which is its own useful signal, but
+  // we still want every OTHER test's temp dir cleaned up.
   rmSync(dir, { recursive: true, force: true })
+
+  if (leaked.length > 0) {
+    throw new Error(
+      `migrations.test.ts: ${leaked.length} DatabaseSync handle(s) opened via openDb() were ` +
+        'still open when this test ended. Every handle must be closed (assign it to `db`, or ' +
+        'close it directly) before the test finishes — a leaked handle holds a real file lock ' +
+        'on Windows until it happens to be garbage-collected, which can stall a later test.'
+    )
+  }
 })
 
 function openDb(): DatabaseSync {
-  db = new DatabaseSync(join(dir, 'test.db'))
-  return db
+  const handle = new DatabaseSync(join(dir, 'test.db'))
+  // Match getDb()'s locking pragmas (src/main/db/index.ts) — same as the established
+  // raw-DatabaseSync test pattern in tests/db-backup.test.ts. The default rollback-journal
+  // (DELETE) mode needs a transient but real EXCLUSIVE lock on the whole file for every
+  // commit; Windows enforces file locks as mandatory (not merely advisory like POSIX), so an
+  // external process transiently holding even a SHARED handle on a just-created temp file
+  // (antivirus/indexing scanning it, common on Windows CI runners) can stall that EXCLUSIVE
+  // upgrade for real, not just in theory. WAL avoids needing that lock for ordinary writes.
+  // busy_timeout then turns whatever contention remains into a bounded wait instead of an
+  // immediate SQLITE_BUSY throw (the default busy_timeout is 0 — no retry at all).
+  handle.exec('PRAGMA journal_mode = WAL')
+  handle.exec('PRAGMA busy_timeout = 5000')
+  db = handle
+  openHandles.push(handle)
+  return handle
 }
 
 function userVersion(handle: DatabaseSync): number {

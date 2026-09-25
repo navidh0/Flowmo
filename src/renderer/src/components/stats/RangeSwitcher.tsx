@@ -32,7 +32,7 @@ export function RangeSwitcher({ value, onChange }: RangeSwitcherProps): React.JS
             onClick={() => onChange(r.value)}
             className={`rounded-full px-3 py-1.5 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40 ${
               active
-                ? 'bg-[var(--color-focus)] text-[#0a0d12]'
+                ? 'bg-[var(--color-focus)] text-[var(--color-on-accent)]'
                 : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
             }`}
           >

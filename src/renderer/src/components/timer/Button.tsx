@@ -34,10 +34,10 @@ const SIZES: Record<ButtonSize, string> = {
 }
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'text-[#0a0d12]',
+  primary: 'text-[var(--color-on-accent)]',
   secondary:
     'border border-[var(--color-border)] bg-[var(--color-surface-raised)] text-[var(--color-text)] ' +
-    'enabled:hover:border-[#39414f] enabled:hover:bg-[#1e222b] disabled:opacity-40',
+    'enabled:hover:border-[var(--color-border-hover)] enabled:hover:bg-[var(--color-surface-hover)] disabled:opacity-40',
   ghost:
     'text-[var(--color-text-muted)] enabled:hover:bg-[var(--color-surface-raised)] ' +
     'enabled:hover:text-[var(--color-text)] disabled:opacity-40',

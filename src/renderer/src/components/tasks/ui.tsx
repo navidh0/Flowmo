@@ -12,7 +12,7 @@ export const FIELD =
   'w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-sunken)] ' +
   'px-2.5 py-1.5 text-[13px] text-[var(--color-text)] outline-none ' +
   'placeholder:text-[var(--color-text-muted)]/70 transition-colors ' +
-  'hover:border-[#39414f] focus:border-[var(--color-focus)] ' +
+  'hover:border-[var(--color-border-hover)] focus:border-[var(--color-focus)] ' +
   'focus:ring-1 focus:ring-[var(--color-focus)]/40'
 
 /** Row-hover affordances. Also revealed by keyboard focus, or they are unreachable. */

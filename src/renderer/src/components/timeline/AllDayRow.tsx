@@ -38,7 +38,7 @@ export function AllDayRow({ dayMs, events, feedColors }: AllDayRowProps): React.
           tabIndex={0}
           title={e.location ? `${e.title} — ${e.location}` : e.title}
           aria-label={`All-day: ${e.title}`}
-          className="truncate rounded-md px-2 py-1 text-[11px] font-medium text-[#0a0d12] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
+          className="truncate rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-on-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
           style={{ backgroundColor: eventColor(e.feedId, feedColors) }}
         >
           {e.title}

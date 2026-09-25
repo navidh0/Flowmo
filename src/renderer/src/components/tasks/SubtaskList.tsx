@@ -34,7 +34,7 @@ function Row({ subtask }: { subtask: Subtask }): React.JSX.Element {
         onClick={() => void updateSubtask(subtask.id, { done: !subtask.done })}
         className={`grid h-[15px] w-[15px] shrink-0 place-items-center rounded-[4px] border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]/45 ${
           subtask.done
-            ? 'border-[var(--color-focus)] bg-[var(--color-focus)] text-[#0a0d12]'
+            ? 'border-[var(--color-focus)] bg-[var(--color-focus)] text-[var(--color-on-accent)]'
             : 'border-[var(--color-border)] hover:border-[var(--color-text-muted)]'
         }`}
       >

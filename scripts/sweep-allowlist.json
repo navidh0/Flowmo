@@ -1,0 +1,122 @@
+[
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#6366f1'",
+    "reason": "User-selectable project colours (SWATCHES) — data the person picks per project, not a theme token. See the comment right above SWATCHES. One entry per line since the array is formatted one hex per line."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#22c55e'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#f59e0b'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#ec4899'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#06b6d4'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#a855f7'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#ef4444'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/tasks/ProjectSidebar.tsx",
+    "match": "'#84cc16'",
+    "reason": "User-selectable project colours (SWATCHES) — data, not a theme token. See the comment above SWATCHES."
+  },
+  {
+    "rule": "hex-colour",
+    "file": "src/renderer/src/components/settings/integrations/CalendarsSection.tsx",
+    "match": "const PALETTE = [",
+    "reason": "Calendar feed swatch colours — user data exactly like the project swatches, not a theme token. The file's own comment above PALETTE says so."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/tasks/index.tsx",
+    "match": "w-[19rem]",
+    "reason": "Task detail form panel is deliberately fixed-width so its inputs don't stretch with the window (see the comment directly above this line) — it isn't one of the resizable shell panels."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/tasks/SubtaskList.tsx",
+    "match": "w-[15px]",
+    "reason": "Checkbox glyph size, not a layout width — a fixed-size square control, never resized."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/tasks/TaskRow.tsx",
+    "match": "w-[3px]",
+    "reason": "Selected-row accent bar thickness, a decorative sliver, not a layout width."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/tasks/TaskRow.tsx",
+    "match": "w-[17px]",
+    "reason": "Checkbox glyph size, not a layout width — a fixed-size square control, never resized."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/tasks/TaskRow.tsx",
+    "match": "w-[7px]",
+    "reason": "Priority/status dot glyph size, not a layout width."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/timer/EarnedBreak.tsx",
+    "match": "w-[320px]",
+    "reason": "Fixed-size popup card anchored under the timer, not a resizable shell panel."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/timer/ModeToggle.tsx",
+    "match": "w-[calc(50%-0.25rem)]",
+    "reason": "The sliding fill behind the two-option toggle — its width is tied to the pill's own geometry (half minus the padding gap), not a resizable panel."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/timer/ModeToggle.tsx",
+    "match": "w-[112px]",
+    "reason": "The two mode buttons must match the sliding fill's width above exactly, so both toggle options stay the same size — not a resizable panel."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/timer/ModeToggle.tsx",
+    "match": "w-[292px]",
+    "reason": "Fixed-size confirmation popover anchored under the toggle, not a resizable shell panel."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/timer/RoundDots.tsx",
+    "match": "w-[7px]",
+    "reason": "Round-tracker dot glyph size, not a layout width."
+  },
+  {
+    "rule": "fixed-width",
+    "file": "src/renderer/src/components/timer/TaskChip.tsx",
+    "match": "w-[7px]",
+    "reason": "Status dot glyph size, not a layout width."
+  }
+]

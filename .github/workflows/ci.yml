@@ -24,8 +24,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -39,13 +39,13 @@ jobs:
         run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-screenshots
           path: e2e/out/
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-installers
           path: |
@@ -56,8 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -67,3 +67,35 @@ jobs:
       - run: npm run build
       - name: End-to-end smoke (Xvfb has no window manager, so no minimize)
         run: xvfb-run -a -s "-screen 0 1500x950x24" npm run e2e -- --no-minimize
+
+  # Fast, dependency-light checks that don't need a Windows/Linux build+e2e round trip:
+  # the project's own mechanical invariants (scripts/sweep.mjs) and a production-dependency
+  # vulnerability audit. Runs under workflow_call too, so it also gates releases.
+  standards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # fetch-depth: 0 pulls full history for every branch (not just the triggering ref), so
+      # `origin/<base_ref>` below always resolves, both for a same-repo PR and for release.yml
+      # reusing this workflow on a push to main (where the commit-range step is skipped).
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Project invariants (sweep)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            npm run sweep -- --commits "origin/$BASE_REF..HEAD"
+          else
+            npm run sweep
+          fi
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

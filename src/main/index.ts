@@ -76,6 +76,10 @@ let miniPositionTimer: NodeJS.Timeout | null = null
  */
 let lastMiniPosition: Point | null = null
 
+/** Pending mini-widget size write and its last report: the position's twin, same reasons. */
+let miniSizeTimer: NodeJS.Timeout | null = null
+let lastMiniSize: { width: number; height: number } | null = null
+
 /** Opens the mini widget while the main window is off screen. Created once settings load. */
 let miniAuto: MiniAuto
 
@@ -182,7 +186,9 @@ if (!gotLock) {
 
     configureMiniWidget({
       getSavedPosition: () => settingsRepo.getMiniPosition(),
-      onMoved: rememberMiniPosition
+      onMoved: rememberMiniPosition,
+      getSavedSize: () => settingsRepo.getMiniSize(),
+      onResized: rememberMiniSize
     })
     miniAuto = createMiniAuto({
       getSettings: () => settings,
@@ -248,6 +254,11 @@ if (!gotLock) {
       // (see lastMiniPosition's doc comment).
       if (lastMiniPosition) settingsRepo.setMiniPosition(lastMiniPosition)
     }
+    if (miniSizeTimer) {
+      clearTimeout(miniSizeTimer)
+      miniSizeTimer = null
+      if (lastMiniSize) settingsRepo.setMiniSize(lastMiniSize)
+    }
     updater?.dispose()
     todoist?.stop()
     calendars?.stop()
@@ -279,6 +290,16 @@ function rememberMiniPosition(position: Point): void {
   miniPositionTimer = setTimeout(() => {
     miniPositionTimer = null
     settingsRepo.setMiniPosition(position)
+  }, 400)
+}
+
+/** And for its size, which a resize reports every frame the same way. */
+function rememberMiniSize(size: { width: number; height: number }): void {
+  lastMiniSize = size
+  if (miniSizeTimer) clearTimeout(miniSizeTimer)
+  miniSizeTimer = setTimeout(() => {
+    miniSizeTimer = null
+    settingsRepo.setMiniSize(size)
   }, 400)
 }
 

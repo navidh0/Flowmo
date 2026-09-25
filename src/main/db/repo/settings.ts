@@ -2,6 +2,7 @@ import type { LayoutSettings, PanelId, Settings, TimerMode } from '@shared/types
 import {
   DEFAULT_LAYOUT,
   DEFAULT_SETTINGS,
+  DENSITIES,
   PANEL_IDS,
   PANEL_MAX_WIDTH,
   PANEL_MIN_WIDTH,
@@ -151,6 +152,7 @@ export function get(): Settings {
     miniWidgetOnMinimize: pickBoolean(s.get('miniWidgetOnMinimize'), d.miniWidgetOnMinimize),
     autoUpdate: pickBoolean(s.get('autoUpdate'), d.autoUpdate),
     theme: pickEnum(s.get('theme'), THEMES, d.theme),
+    density: pickEnum(s.get('density'), DENSITIES, d.density),
 
     hotkeyStartPause: pickString(s.get('hotkeyStartPause'), d.hotkeyStartPause),
     hotkeySkip: pickString(s.get('hotkeySkip'), d.hotkeySkip),
@@ -258,6 +260,44 @@ export function setMiniPosition(point: StoredPoint): void {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`
     )
     .run(MINI_POSITION_KEY, JSON.stringify({ x: point.x, y: point.y }))
+}
+
+/**
+ * The size the user last resized the mini widget to. Same storage as the position, and
+ * absent until the first resize. Only shape is checked here; clamping to the widget's
+ * minimum and maximum is the window's job (`fitMiniSize` in windows.ts), so a changed
+ * limit in a later version still applies to a size stored by an earlier one.
+ */
+const MINI_SIZE_KEY = 'internal:miniSize'
+
+export interface StoredSize {
+  width: number
+  height: number
+}
+
+export function getMiniSize(): StoredSize | null {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(MINI_SIZE_KEY)
+  if (!row) return null
+
+  try {
+    const parsed: unknown = JSON.parse(str(row, 'value'))
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const p = parsed as Record<string, unknown>
+    if (typeof p.width !== 'number' || !Number.isFinite(p.width)) return null
+    if (typeof p.height !== 'number' || !Number.isFinite(p.height)) return null
+    return { width: p.width, height: p.height }
+  } catch {
+    return null
+  }
+}
+
+export function setMiniSize(size: StoredSize): void {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    .run(MINI_SIZE_KEY, JSON.stringify({ width: size.width, height: size.height }))
 }
 
 /**

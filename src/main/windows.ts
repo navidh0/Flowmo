@@ -216,8 +216,30 @@ export interface Point {
   y: number
 }
 
-/** The mini widget's fixed size — the renderer's layout is built for exactly this. */
+/**
+ * The mini widget's default and minimum size: the renderer's layout is built for exactly
+ * this and scales up from it (container queries in components/mini), never down.
+ */
 export const MINI_SIZE = { width: 220, height: 88 }
+
+/** Past this the widget stops being a widget and starts covering what you're working on. */
+export const MINI_MAX_SIZE = { width: 480, height: 200 }
+
+/**
+ * A saved size clamped into [MINI_SIZE, MINI_MAX_SIZE] and rounded to whole pixels, or the
+ * default when nothing was saved. Pure, for tests.
+ */
+export function fitMiniSize(saved: { width: number; height: number } | null): {
+  width: number
+  height: number
+} {
+  if (!saved) return { ...MINI_SIZE }
+  const clamp = (v: number, lo: number, hi: number): number => Math.round(Math.min(hi, Math.max(lo, v)))
+  return {
+    width: clamp(saved.width, MINI_SIZE.width, MINI_MAX_SIZE.width),
+    height: clamp(saved.height, MINI_SIZE.height, MINI_MAX_SIZE.height)
+  }
+}
 
 /** Gap between the widget and the work area's edge, so it doesn't sit flush on the taskbar. */
 const MINI_MARGIN = 16
@@ -242,6 +264,10 @@ export interface MiniWidgetOptions {
   getSavedPosition?: () => Point | null
   /** Called on every move frame; the caller debounces the write. */
   onMoved?: (position: Point) => void
+  /** The size the user last resized the widget to, or null for the default. */
+  getSavedSize?: () => { width: number; height: number } | null
+  /** Called on every resize frame; the caller debounces the write. */
+  onResized?: (size: { width: number; height: number }) => void
 }
 
 let miniOptions: MiniWidgetOptions = {}
@@ -256,12 +282,12 @@ export function configureMiniWidget(options: MiniWidgetOptions): void {
  * display (clamped so none of it hangs off the edge), otherwise the bottom-right corner of
  * the display the main window is on — the screen the user is looking at.
  */
-function miniPlacement(): Point {
+function miniPlacement(size: { width: number; height: number }): Point {
   const saved = miniOptions.getSavedPosition?.() ?? null
   if (saved) {
-    const rect = { ...saved, ...MINI_SIZE }
+    const rect = { ...saved, ...size }
     if (isOnSomeDisplay(rect)) {
-      const fitted = clampBoundsToArea(rect, screen.getDisplayMatching(rect).workArea, MINI_SIZE)
+      const fitted = clampBoundsToArea(rect, screen.getDisplayMatching(rect).workArea, size)
       return { x: fitted.x, y: fitted.y }
     }
   }
@@ -270,7 +296,7 @@ function miniPlacement(): Point {
   const display = main
     ? screen.getDisplayMatching(main.getNormalBounds())
     : screen.getPrimaryDisplay()
-  return bottomRightCorner(display.workArea, MINI_SIZE)
+  return bottomRightCorner(display.workArea, size)
 }
 
 /**
@@ -291,13 +317,19 @@ export function setMiniWidget(visible: boolean): void {
     return
   }
 
-  const position = miniPlacement()
+  const size = fitMiniSize(miniOptions.getSavedSize?.() ?? null)
+  const position = miniPlacement(size)
   const win = new BrowserWindow({
-    ...MINI_SIZE,
+    ...size,
     ...position,
+    minWidth: MINI_SIZE.width,
+    minHeight: MINI_SIZE.height,
+    maxWidth: MINI_MAX_SIZE.width,
+    maxHeight: MINI_MAX_SIZE.height,
     show: false,
     frame: false,
-    resizable: false,
+    // Resized from its edges: frameless windows keep a thin native resize border.
+    resizable: true,
     maximizable: false,
     minimizable: false,
     alwaysOnTop: true,
@@ -319,6 +351,10 @@ export function setMiniWidget(visible: boolean): void {
   win.on('move', () => {
     const [x, y] = win.getPosition()
     if (x !== undefined && y !== undefined) miniOptions.onMoved?.({ x, y })
+  })
+  win.on('resize', () => {
+    const [width, height] = win.getSize()
+    if (width !== undefined && height !== undefined) miniOptions.onResized?.({ width, height })
   })
   win.on('closed', () => {
     miniWindow = null

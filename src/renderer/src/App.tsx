@@ -54,6 +54,13 @@ export default function App(): React.JSX.Element {
   const isMini = useIsMiniRoute()
   useTimerSync()
 
+  // On <html>, so index.css can rescale the spacing base for everything under it — in both
+  // windows, since they share this component and the same settings broadcast.
+  const density = useTimerStore((s) => s.settings.density)
+  useEffect(() => {
+    document.documentElement.dataset.density = density
+  }, [density])
+
   if (isMini) return <MiniWidget />
   return <MainShell />
 }

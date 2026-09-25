@@ -3,6 +3,7 @@ out/
 dist/
 release/
 *.log
+e2e/out/
 .DS_Store
 .vite/
 

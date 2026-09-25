@@ -1,0 +1,82 @@
+# Publishes a release when main carries a version that has no tag yet — bump package.json,
+# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the full CI gate again, the
+# Windows installers, an annotated tag, and a GitHub Release with the notes and both
+# artefacts. Nothing is published unless every check passes on this exact commit.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already tagged; nothing to release."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          elif [ ! -f "docs/releases/v$version.md" ]; then
+            echo "::error::package.json is at $version but docs/releases/v$version.md is missing. Release notes are required."
+            exit 1
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  gate:
+    needs: detect
+    if: needs.detect.outputs.needed == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [detect, gate]
+    if: needs.detect.outputs.needed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build installers
+        run: npm run build && npx electron-builder --win --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Tag and publish
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          title=$(head -n 1 "docs/releases/v$VERSION.md" | sed 's/^# *//')
+          git tag -a "v$VERSION" -m "$title"
+          git push origin "v$VERSION"
+          # Publish the page first, then upload each file: a one-shot create with large
+          # files once stalled as an empty draft (release skill, v0.3.0).
+          tail -n +2 "docs/releases/v$VERSION.md" > "$RUNNER_TEMP/notes.md"
+          gh release create "v$VERSION" --verify-tag --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
+          for f in "release/Flowdo-Setup-$VERSION.exe" "release/Flowdo-$VERSION-portable.exe"; do
+            gh release upload "v$VERSION" "$f" --clobber
+          done
+          gh release view "v$VERSION" --json assets --jq '.assets[] | "\(.name) \(.size)"'

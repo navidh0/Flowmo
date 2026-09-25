@@ -64,6 +64,13 @@ let miniPositionTimer: NodeJS.Timeout | null = null
 /** Opens the mini widget while the main window is off screen. Created once settings load. */
 let miniAuto: MiniAuto
 
+// Test harnesses (e2e/smoke.mjs) point the app at a throwaway profile, so an automated run
+// can never open — or damage — a real database. Must precede the single-instance lock, which
+// is keyed on userData, so a test instance also never collides with a running real one.
+if (process.env['FLOWDO_USER_DATA_DIR']) {
+  app.setPath('userData', process.env['FLOWDO_USER_DATA_DIR'])
+}
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   // A second instance would run a second timer against the same SQLite file.

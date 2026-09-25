@@ -12,9 +12,8 @@
     "types": ["electron-vite/node", "node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["./src/shared/*"]
     }
   }
 }

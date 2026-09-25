@@ -48,6 +48,24 @@ export async function run() {
     const title = await page.title()
     check('window title is Flowdo', title === 'Flowdo', title)
 
+    // Both windows set the app icon explicitly (windows.ts, APP_ICON_NOTE). Without it the
+    // Windows taskbar showed a blank placeholder. The asset has to ship inside the package and
+    // decode, on every target this suite runs against (unpacked, installed, AppImage, deb).
+    const icon = await app.evaluate(({ app, nativeImage }) => {
+      const fs = process.getBuiltinModule('node:fs')
+      const path = process.getBuiltinModule('node:path')
+      const dir = path.join(app.getAppPath(), 'out', 'main', 'chunks')
+      const file = fs.existsSync(dir) ? fs.readdirSync(dir).find((f) => /^icon-.*\.png$/.test(f)) : undefined
+      if (!file) return { file: null }
+      const image = nativeImage.createFromPath(path.join(dir, file))
+      return { file, empty: image.isEmpty(), ...image.getSize() }
+    })
+    check(
+      'the window icon ships with the app and decodes at full size',
+      !!icon.file && !icon.empty && icon.width >= 256 && icon.height >= 256,
+      JSON.stringify(icon)
+    )
+
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'))
     const version = await page.evaluate(() => window.flowdo.app.getVersion())
     check('app.getVersion() matches package.json', version === pkg.version, `${version} vs ${pkg.version}`)

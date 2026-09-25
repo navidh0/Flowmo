@@ -20,6 +20,11 @@
  * edge is carved out as `no-drag` to give the window manager a chance to see the edge. It costs
  * a few px of the "whole widget drags" affordance everywhere, in exchange for edges that are
  * resizable everywhere.
+ *
+ * Frameless also means no title-bar close button, so the widget carries its own small X in the
+ * top corner, set apart from the two controls so it can't be mistaken for Dismiss. It goes
+ * through `app.setMiniWidget(false)`, the same path as the tray's toggle: that counts as the
+ * user's explicit choice, so an auto-opened widget isn't reopened until the window next leaves.
  */
 
 import type { CSSProperties } from 'react'
@@ -112,6 +117,16 @@ export function MiniWidget(): React.JSX.Element {
       <div className={`absolute inset-y-0 left-0 ${EDGE_MARGIN_SIDE} cursor-ew-resize`} style={NO_DRAG} />
       <div className={`absolute inset-y-0 right-0 ${EDGE_MARGIN_SIDE} cursor-ew-resize`} style={NO_DRAG} />
 
+      <button
+        type="button"
+        aria-label="Close widget"
+        title="Close the widget"
+        onClick={() => void window.flowdo.app.setMiniWidget(false)}
+        className="absolute right-1 top-1 z-10 grid h-4 w-4 place-items-center rounded text-[var(--color-text-muted)] opacity-60 outline-none transition-opacity hover:bg-[var(--color-surface-raised)] hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-[var(--color-text-muted)]"
+        style={NO_DRAG}
+      >
+        <XIcon className="h-2.5 w-2.5" />
+      </button>
       <div className="flex flex-1 items-center gap-2 px-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">

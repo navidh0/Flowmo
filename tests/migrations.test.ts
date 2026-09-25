@@ -55,11 +55,11 @@ function columnNames(handle: DatabaseSync, table: string): string[] {
 }
 
 describe('a fresh database', () => {
-  it('ends at user_version 3 with every v1/v2/v3 table and column present', () => {
+  it('ends at user_version 4 with every v1/v2/v3 table and column present', () => {
     const handle = openDb()
     runMigrations(handle)
 
-    expect(userVersion(handle)).toBe(3)
+    expect(userVersion(handle)).toBe(4)
 
     const tables = tableNames(handle)
     for (const table of [
@@ -154,7 +154,7 @@ describe('upgrading a v1-only database', () => {
 
     runMigrations(handle)
 
-    expect(userVersion(handle)).toBe(3)
+    expect(userVersion(handle)).toBe(4)
     expect(handle.prepare('SELECT COUNT(*) AS n FROM projects').get()).toEqual(projectsBefore)
     expect(handle.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual(tasksBefore)
     expect(handle.prepare('SELECT COUNT(*) AS n FROM subtasks').get()).toEqual(subtasksBefore)
@@ -215,7 +215,7 @@ describe('upgrading a v2 database', () => {
     return { feedId, eventId }
   }
 
-  it('adds calendar_events.tzid as NULL and preserves the existing row, ending at user_version 3', () => {
+  it('adds calendar_events.tzid as NULL and preserves the existing row, ending at user_version 4', () => {
     const handle = openDb()
     const { feedId, eventId } = seedV2(handle)
 
@@ -223,7 +223,7 @@ describe('upgrading a v2 database', () => {
 
     runMigrations(handle)
 
-    expect(userVersion(handle)).toBe(3)
+    expect(userVersion(handle)).toBe(4)
     expect(columnNames(handle, 'calendar_events')).toContain('tzid')
 
     const feed = handle.prepare('SELECT * FROM calendar_feeds WHERE id = ?').get(feedId) as Record<
@@ -297,11 +297,98 @@ describe('idempotency', () => {
   it('running migrations twice is a no-op the second time', () => {
     const handle = openDb()
     runMigrations(handle)
-    expect(userVersion(handle)).toBe(3)
+    expect(userVersion(handle)).toBe(4)
 
     const tablesBefore = tableNames(handle).sort()
     expect(() => runMigrations(handle)).not.toThrow()
-    expect(userVersion(handle)).toBe(3)
+    expect(userVersion(handle)).toBe(4)
     expect(tableNames(handle).sort()).toEqual(tablesBefore)
+  })
+})
+
+describe('backfilling Flowmodoro focus completed (v4)', () => {
+  /**
+   * Seeds a v3 database (pre-backfill) with one row per case the migration must
+   * distinguish, and returns each row's id from `run()`'s own result rather than a
+   * follow-up query, so there is no ambiguity about which row is which.
+   */
+  function seedV3Sessions(handle: DatabaseSync): {
+    flowFocusIncomplete: number
+    flowFocusComplete: number
+    pomoFocusIncomplete: number
+    flowBreakIncomplete: number
+  } {
+    MIGRATIONS[0]!.up(handle)
+    MIGRATIONS[1]!.up(handle)
+    MIGRATIONS[2]!.up(handle)
+    handle.exec('PRAGMA user_version = 3')
+
+    const insert = handle.prepare(
+      `INSERT INTO sessions
+         (task_id, project_id, mode, kind, started_at, ended_at, planned_ms, actual_ms, completed, interrupted, notes)
+       VALUES (NULL, NULL, ?, ?, 0, 1000, ?, 1000, ?, 0, NULL)`
+    )
+
+    // The bug this migration undoes: a Flowmodoro focus row logged completed = 0 by the
+    // pre-fix stop()/setMode(). plannedMs is null, as it always is for Flowmodoro focus.
+    const flowFocusIncomplete = Number(
+      insert.run('flowmodoro', 'focus', null, 0).lastInsertRowid
+    )
+    // Already correct (e.g. logged by skip()/takeBreak(), which never had the bug) — must
+    // be left alone, not merely left at 1 by coincidence of the UPDATE's WHERE clause.
+    const flowFocusComplete = Number(
+      insert.run('flowmodoro', 'focus', null, 1).lastInsertRowid
+    )
+    // Pomodoro keeps its plan-based rule: stopped short of its 25-minute plan, genuinely
+    // incomplete, and must NOT be touched by a migration scoped to Flowmodoro focus only.
+    const pomoFocusIncomplete = Number(
+      insert.run('pomodoro', 'focus', 1_500_000, 0).lastInsertRowid
+    )
+    // A Flowmodoro break always has a plannedMs and keeps the plan-based rule too — the
+    // migration's `kind = 'focus'` clause must not sweep this up.
+    const flowBreakIncomplete = Number(
+      insert.run('flowmodoro', 'short_break', 300_000, 0).lastInsertRowid
+    )
+
+    return { flowFocusIncomplete, flowFocusComplete, pomoFocusIncomplete, flowBreakIncomplete }
+  }
+
+  function completedOf(handle: DatabaseSync, id: number): number {
+    const row = handle.prepare('SELECT completed FROM sessions WHERE id = ?').get(id) as Record<
+      string,
+      unknown
+    >
+    return Number(row.completed)
+  }
+
+  it('flips only Flowmodoro focus rows with completed = 0 to 1, ending at user_version 4', () => {
+    const handle = openDb()
+    const ids = seedV3Sessions(handle)
+
+    runMigrations(handle)
+
+    expect(userVersion(handle)).toBe(4)
+    expect(completedOf(handle, ids.flowFocusIncomplete)).toBe(1)
+    expect(completedOf(handle, ids.flowFocusComplete)).toBe(1)
+    expect(completedOf(handle, ids.pomoFocusIncomplete)).toBe(0)
+    expect(completedOf(handle, ids.flowBreakIncomplete)).toBe(0)
+  })
+
+  it('is a no-op on re-run', () => {
+    const handle = openDb()
+    const ids = seedV3Sessions(handle)
+
+    runMigrations(handle)
+    const after1 = {
+      flowFocusIncomplete: completedOf(handle, ids.flowFocusIncomplete),
+      pomoFocusIncomplete: completedOf(handle, ids.pomoFocusIncomplete),
+      flowBreakIncomplete: completedOf(handle, ids.flowBreakIncomplete)
+    }
+
+    expect(() => runMigrations(handle)).not.toThrow()
+    expect(userVersion(handle)).toBe(4)
+    expect(completedOf(handle, ids.flowFocusIncomplete)).toBe(after1.flowFocusIncomplete)
+    expect(completedOf(handle, ids.pomoFocusIncomplete)).toBe(after1.pomoFocusIncomplete)
+    expect(completedOf(handle, ids.flowBreakIncomplete)).toBe(after1.flowBreakIncomplete)
   })
 })

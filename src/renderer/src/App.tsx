@@ -61,6 +61,27 @@ export default function App(): React.JSX.Element {
     document.documentElement.dataset.density = density
   }, [density])
 
+  // The theme is an attribute on <html> too, rather than index.css reading
+  // prefers-color-scheme: whether Chromium feeds nativeTheme.themeSource into that media
+  // query depends on the Linux desktop's colour-scheme portal, and on a bare X session it
+  // doesn't, so light would paint a light window frame around dark content. Only 'system'
+  // asks the OS, and follows it live.
+  const theme = useTimerStore((s) => s.settings.theme)
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme !== 'system') {
+      root.dataset.theme = theme
+      return
+    }
+    const dark = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = (): void => {
+      root.dataset.theme = dark.matches ? 'dark' : 'light'
+    }
+    apply()
+    dark.addEventListener('change', apply)
+    return () => dark.removeEventListener('change', apply)
+  }, [theme])
+
   if (isMini) return <MiniWidget />
   return <MainShell />
 }

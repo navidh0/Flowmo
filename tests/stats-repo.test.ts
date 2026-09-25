@@ -490,3 +490,38 @@ describe('streakDays', () => {
     expect(stats.streakDays(now)).toBe(0)
   })
 })
+
+describe('week range follows weekStartsOn', () => {
+  // Thursday 2026-06-11, mid-afternoon.
+  const thursday = local(2026, 5, 11, 15, 0)
+
+  it('defaults to a Monday start', () => {
+    expect(stats.rangeBounds('week', thursday).fromMs).toBe(local(2026, 5, 8))
+  })
+
+  it('starts on Sunday when weekStartsOn is 0', () => {
+    expect(stats.rangeBounds('week', thursday, 0).fromMs).toBe(local(2026, 5, 7))
+  })
+
+  it('starts on Saturday when weekStartsOn is 6', () => {
+    expect(stats.rangeBounds('week', thursday, 6).fromMs).toBe(local(2026, 5, 6))
+  })
+
+  it('is today when today is the first day of the week', () => {
+    const sunday = local(2026, 5, 14, 9, 0)
+    expect(stats.rangeBounds('week', sunday, 0).fromMs).toBe(local(2026, 5, 14))
+  })
+
+  it('crosses a DST change on local midnights, not 24-hour steps', () => {
+    // 2026-03-08 is the US spring-forward Sunday. Tuesday 10 March with a Saturday start
+    // reaches back across it to Saturday 7 March 00:00 local.
+    const tuesday = local(2026, 2, 10, 12, 0)
+    expect(stats.rangeBounds('week', tuesday, 6).fromMs).toBe(local(2026, 2, 7))
+  })
+
+  it('daily() emits buckets from the configured first day', () => {
+    const buckets = stats.daily('week', thursday, 0)
+    expect(buckets[0]?.date).toBe('2026-06-07')
+    expect(buckets.at(-1)?.date).toBe('2026-06-11')
+  })
+})

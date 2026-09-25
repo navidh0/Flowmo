@@ -133,9 +133,22 @@ export interface Settings {
    */
   sleepGraceMs: number
 
+  /**
+   * The first day of the calendar week, in `Date#getDay()` numbering (0 = Sunday). Governs
+   * the Week and Month views and the Stats "This week" range, so "this week" means the same
+   * seven days everywhere in the app.
+   */
+  weekStartsOn: Weekday
+
   /** Shell arrangement. See `LayoutSettings`. */
   layout: LayoutSettings
 }
+
+/** A day of the week in `Date#getDay()` numbering: 0 = Sunday … 6 = Saturday. */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
+
+/** Every `Weekday`, Sunday first — the one list validators and pickers iterate. */
+export const WEEKDAYS: readonly Weekday[] = [0, 1, 2, 3, 4, 5, 6]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Layout
@@ -214,6 +227,9 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkeySkip: 'Control+Alt+S',
 
   sleepGraceMs: 2 * 60_000,
+
+  // Monday, as every version before 0.3.1 hard-coded.
+  weekStartsOn: 1,
 
   layout: DEFAULT_LAYOUT
 }

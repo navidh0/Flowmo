@@ -4,8 +4,10 @@ import type {
   ProjectBucket,
   StatsRange,
   StatsSummary,
-  TimerMode
+  TimerMode,
+  Weekday
 } from '@shared/types'
+import { DEFAULT_SETTINGS } from '@shared/types'
 import { getDb, num, scalarNum, str, strOrNull, numOrNull, type Row } from '../index'
 
 /**
@@ -73,17 +75,22 @@ export interface RangeBounds {
 
 /**
  * Calendar boundaries, not rolling windows: "today" is since local midnight, not the last
- * 24 hours, and "week" starts on Monday. Both bounds are inclusive.
+ * 24 hours, and "week" starts on `weekStartsOn` (the user's setting; Monday by default).
+ * Both bounds are inclusive.
  */
-export function rangeBounds(range: StatsRange, now = Date.now()): RangeBounds {
+export function rangeBounds(
+  range: StatsRange,
+  now = Date.now(),
+  weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn
+): RangeBounds {
   const today = startOfLocalDay(now)
 
   if (range === 'today') return { fromMs: today, toMs: now }
 
   if (range === 'week') {
-    // getDay() is 0 for Sunday; shift so Monday is 0.
-    const mondayOffset = (new Date(today).getDay() + 6) % 7
-    return { fromMs: addLocalDays(today, -mondayOffset), toMs: now }
+    // Days since the week's first day; getDay() is 0 for Sunday whatever the week start.
+    const offset = (new Date(today).getDay() - weekStartsOn + 7) % 7
+    return { fromMs: addLocalDays(today, -offset), toMs: now }
   }
 
   if (range === 'year') {
@@ -132,8 +139,12 @@ export function streakDays(now = Date.now()): number {
   return count
 }
 
-export function summary(range: StatsRange, now = Date.now()): StatsSummary {
-  const { fromMs, toMs } = rangeBounds(range, now)
+export function summary(
+  range: StatsRange,
+  now = Date.now(),
+  weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn
+): StatsSummary {
+  const { fromMs, toMs } = rangeBounds(range, now, weekStartsOn)
   const db = getDb()
 
   const totals = db
@@ -205,8 +216,12 @@ export function summary(range: StatsRange, now = Date.now()): StatsSummary {
  * local calendar day. Zero-days are emitted explicitly: a chart handed only non-empty
  * days compresses the gaps and draws a week off as a smooth line.
  */
-export function daily(range: StatsRange, now = Date.now()): DailyBucket[] {
-  const { fromMs, toMs } = rangeBounds(range, now)
+export function daily(
+  range: StatsRange,
+  now = Date.now(),
+  weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn
+): DailyBucket[] {
+  const { fromMs, toMs } = rangeBounds(range, now, weekStartsOn)
 
   const rows = getDb()
     .prepare(
@@ -253,8 +268,12 @@ export function daily(range: StatsRange, now = Date.now()): DailyBucket[] {
  * Attribution is whatever was recorded when the session ended, so moving a task to
  * another project later does not rewrite last month's chart.
  */
-export function byProject(range: StatsRange, now = Date.now()): ProjectBucket[] {
-  const { fromMs, toMs } = rangeBounds(range, now)
+export function byProject(
+  range: StatsRange,
+  now = Date.now(),
+  weekStartsOn: Weekday = DEFAULT_SETTINGS.weekStartsOn
+): ProjectBucket[] {
+  const { fromMs, toMs } = rangeBounds(range, now, weekStartsOn)
 
   return getDb()
     .prepare(

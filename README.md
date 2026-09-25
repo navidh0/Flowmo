@@ -43,10 +43,20 @@ minutes spent, even though it didn't complete a round.
   registered on your system and tells you immediately if it's taken, rather than
   saving a binding that silently never fires.
 - An always-on-top mini widget that appears in the corner of the screen when
-  you minimize or close to the tray (drag it anywhere; it remembers), a tray
-  icon reflecting live state, and taskbar progress.
+  you minimize or close to the tray. Drag it anywhere and it remembers the spot,
+  or resize it from 220×88 up to 480×200 to fit your screen — the countdown
+  grows with it, and at larger sizes it also shows your current task. A tray icon
+  reflects live state, and the taskbar shows progress.
 - Global hotkeys for start/pause and skip. Unavailable under Wayland — Flowdo says so
   rather than accepting a binding that will never fire.
+- Light and dark themes, following your OS by default or set manually in
+  Settings → System → Theme. All text meets WCAG AA contrast in both themes.
+- Phase-end chimes: a rising three-note chime when focus ends, a soft falling bell
+  when a break ends. Synthesized in the app with no audio files, controlled
+  separately from notifications in Settings → Behavior → Sound.
+- Arrange your layout: reorder the Projects, Timer, and Tasks panels in
+  Settings → Layout, and choose Comfortable or Compact density to tighten
+  spacing throughout the app. Your arrangement is saved.
 - Launch at login, on both Windows and Linux.
 - JSON export and import. Import **replaces** the entire database — it is not a
   merge — and Flowdo writes a timestamped backup of the existing database before
@@ -168,5 +178,5 @@ pre-import state is always recoverable.
 
 ## Roadmap
 
-See `docs/ROADMAP.md` for the full plan. Next up: a light theme and layout
-options, then more control over deleting your data.
+See `docs/ROADMAP.md` for the full plan. v0.6 (data removal) and v1.0 (hardening)
+are paused after v0.5 until restarted.

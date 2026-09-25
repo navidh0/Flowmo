@@ -109,13 +109,31 @@ itself once that gate passes. v0.4 finished the job.
   follows the window's real state.
 - A widget dragged just before quitting keeps its new position.
 
+### v0.5 — light theme, chimes, and layout you can arrange
+
+- **Light theme** — Settings → System → Theme: System (following the OS live), Light, or Dark.
+  Both windows switch with no flash; all text meets WCAG AA contrast in both themes; project and
+  calendar colors look the same with dark text on them.
+- **Chimes instead of system beep** — when a phase ends, a synthesized rising three-note chime for
+  focus and a soft falling bell for breaks. Generated in-app with no audio files. Settings →
+  Behavior → Sound controls them independently of notifications. Phase interruptions and early
+  stops stay silent. A Test sound button in Settings.
+- **Panel reordering** — Settings → Layout lists Projects, Timer, and Tasks with Move left and
+  Move right buttons. The arrangement persists; Reset layout restores the defaults.
+- **Compact density** — Settings → Layout → Density picks Comfortable (default) or Compact, which
+  tightens spacing by 20% throughout both windows.
+- **Resizable mini widget** — drag its edges to resize from 220×88 (the minimum) to 480×200;
+  the countdown grows with it, and once tall enough also shows the current task's title. Size is
+  remembered like its position.
+- **Layout fixes** — the timer panel no longer scrolls sideways at the smallest window sizes; the
+  earned-break card and switch-mode confirmation fit inside the panel.
+- **Electron 44**.
+
+Released 2026-09-26.
+
 ## Next
 
-### v0.5 — making it yours
-
-- **Light theme** — following the OS by default, overridable in Settings.
-- **Real notification sounds**, replacing the current system beep.
-- **Layout, continued** — reorder the panels, a compact density mode, and a resizable mini widget.
+v0.6 (data removal) and v1.0 (hardening) are paused after v0.5 until restarted.
 
 ### v0.6 — your data, your call
 

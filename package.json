@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "sweep": "node scripts/sweep.mjs",
     "dist": "electron-vite build && electron-builder --win",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/run.mjs",
+    "e2e:drift": "node e2e/drift.mjs"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

@@ -1,10 +1,12 @@
 # Publishes a release when main carries a version that has no tag yet — bump package.json,
-# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the full CI gate again,
-# installers for Windows and Linux (each carrying electron-updater's update-feed file,
-# latest.yml / latest-linux.yml, so installed apps can discover the new version), an
-# annotated tag, and a GitHub Release with the notes and every artefact. Nothing is
-# published unless every check passes on this exact commit and every expected file is
-# actually present to upload.
+# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the full CI gate again (which
+# itself runs the full e2e suite against every artefact and a same-platform drift check on
+# each platform's runner), installers for Windows and Linux (each carrying electron-updater's
+# update-feed file, latest.yml / latest-linux.yml, so installed apps can discover the new
+# version), a cross-platform drift check with both platforms' artefacts side by side, an
+# annotated tag, and a GitHub Release with the notes and every artefact. Nothing is published
+# unless every check passes on this exact commit and every expected file is actually present
+# to upload.
 name: Release
 
 on:
@@ -107,12 +109,20 @@ jobs:
     needs: [detect, build-windows, build-linux]
     if: needs.detect.outputs.needed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       VERSION: ${{ needs.detect.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      # --ignore-scripts: e2e/drift.mjs is a static check over already-built release
+      # artefacts, so it never needs electron's own postinstall (which downloads the
+      # Electron binary) or any other build step — just whatever npm packages it imports.
+      - run: npm ci --ignore-scripts
       - name: Download build artefacts
         uses: actions/download-artifact@v8
         with:
@@ -145,6 +155,14 @@ jobs:
             find dist -maxdepth 2 -type f
             exit 1
           fi
+      - name: Packaging drift check (Windows vs Linux)
+        # The gate (ci.yml, above, reused as `needs: gate` on every push) already ran the
+        # full e2e suite and a same-platform drift check against each platform's own
+        # release/ output on its own runner. This is the one check that needs both
+        # platforms' artefacts side by side — versions, asar contents, and bundled
+        # Electron version must all agree between the Windows and Linux builds actually
+        # being published together as one release.
+        run: node e2e/drift.mjs dist/release-windows dist/release-linux
       - name: Tag and publish
         run: |
           set -euo pipefail

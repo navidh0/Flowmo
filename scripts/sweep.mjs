@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * `npm run sweep` — mechanical enforcement of a handful of project invariants that used to
  * live only in CLAUDE.md/comments, so they stay true instead of merely remembered:
@@ -22,6 +21,10 @@
  * The logic below is exported as pure functions (`scanSource`, `checkCommitMessages`,
  * `applyAllowlist`, …) so `tests/sweep.test.ts` can exercise it directly without shelling
  * out. The CLI only runs when this file is executed directly — see the bottom guard.
+ *
+ * No shebang: this is always invoked as `node scripts/sweep.mjs` (via `npm run sweep`),
+ * never executed directly, and a `#!/usr/bin/env node` on line 1 breaks vitest's module
+ * transform on a CRLF checkout (Windows) even though plain `node --check` tolerates it.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -211,8 +214,8 @@ function checkLayerImport(file, content, out) {
     const isViolation = rule.allowed ? !rule.allowed.has(specZone) : rule.forbidden.has(specZone)
     if (!isViolation) continue
 
-    const lineNo = content.slice(0, m.index).split('\n').length
-    const lineText = content.split('\n')[lineNo - 1] ?? m[0]
+    const lineNo = content.slice(0, m.index).split(/\r?\n/).length
+    const lineText = content.split(/\r?\n/)[lineNo - 1] ?? m[0]
     out.push({
       file,
       line: lineNo,
@@ -284,7 +287,10 @@ export function parseCommitLog(raw) {
  * not covered by this and would need an allowlist entry instead.
  */
 function forEachCodeLine(content, fn) {
-  const lines = content.split('\n')
+  // \r?\n (not a bare '\n') so a CRLF checkout doesn't leave a trailing '\r' glued onto
+  // every line — that '\r' would otherwise sit right after the last real character and
+  // corrupt both `.trim()`-based comment detection and the tail of arbitrary-value matches.
+  const lines = content.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim()
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue

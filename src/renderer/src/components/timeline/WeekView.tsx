@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CalendarEvent, Project, Session, TimerState, Weekday } from '@shared/types'
 import { toLocalDateKey } from '@renderer/lib/format'
-import { eventBlocks, runningBlock, sessionBlocks } from './blocks'
+import { eventBlocks, eventColor, runningBlock, sessionBlocks } from './blocks'
 import { formatColumnHeading, formatHourMark } from './format'
 import { allDayEventSpan, bucketSessionsByDay } from './views'
 import {
@@ -146,12 +146,16 @@ export function WeekView({
                     tabIndex={0}
                     title={item.event.title}
                     aria-label={`All-day: ${item.event.title}`}
-                    className="absolute truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-on-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
+                    // `--color-on-swatch`, not `--color-on-accent`: this fill is a calendar
+                    // feed's own colour (a swatch someone picked, or `eventColor`'s
+                    // theme-independent fallback below), not a design accent — see the
+                    // token's own comment in index.css and timeline/Block.tsx's.
+                    className="absolute truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-on-swatch)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text-muted)]/40"
                     style={{
                       left: `${item.startMs * widthPct}%`,
                       width: `${(item.endMs - item.startMs) * widthPct}%`,
                       top: `${column * 22}px`,
-                      backgroundColor: feedColors.get(item.event.feedId) ?? 'var(--color-focus)'
+                      backgroundColor: eventColor(item.event.feedId, feedColors)
                     }}
                   >
                     {item.event.title}

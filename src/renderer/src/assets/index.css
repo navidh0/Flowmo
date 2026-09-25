@@ -27,6 +27,101 @@
   --color-on-accent: #0a0d12;
   --color-border-hover: #39414f;
   --color-surface-hover: #1e222b;
+
+  /* Text drawn on a `block.color` fill (timeline/Block.tsx and the calendar-feed chips in
+     WeekView/AllDayRow/MonthView) — a project/calendar-feed swatch someone picked off a fixed
+     palette (ProjectSidebar's/CalendarsSection's PALETTE), not one of the design accents
+     above. `--color-on-accent` can't do this job in light mode: it flips near-white there
+     (see the light block below) so it stays readable on the accents this file deliberately
+     darkens for light-surface text contrast, but a swatch hex is untouched user data, not
+     darkened, and stays the same mid-brightness "500"-shade colour in both themes — so the
+     ink that reads on it (near-black) also stays the same in both themes. Deliberately
+     identical in both palettes, by rule, along with every `--color-swatch-*` token below —
+     `tests/theme-surface.test.ts` asserts that for the whole family, not just this one name. */
+  --color-on-swatch: #0a0d12;
+
+  /* `block.color`'s own non-swatch fallbacks (blocks.ts's NEUTRAL/BREAK_COLOR/EVENT_COLOR,
+     used for a no-project session, a break session, and a calendar event whose feed colour
+     hasn't loaded) used to point at `--color-text-muted`/`--color-focus`/`--color-break` —
+     fine in the one dark palette, but once this file grew a SEPARATE light palette that
+     darkens those specific tokens for text contrast, the same near-black `--color-on-swatch`
+     ink stopped reading on them in light mode (`--color-text-muted` ~2.5:1, `--color-break`
+     ~3.55:1). Rather than have `--color-on-swatch` chase whichever token a fill happens to
+     reuse, these three exist so every `block.color` fallback is a genuinely theme-independent
+     mid-tone colour on-swatch can always read — same values in both palettes, chosen (or, for
+     `--color-swatch-event`, re-picked lighter than the dark theme's `--color-focus`) for
+     ≥4.5:1 against `--color-on-swatch` (#0a0d12): swatch-neutral #949bab 6.98:1, swatch-break
+     #10b981 7.67:1, swatch-event #818cf8 6.52:1 (also fixes the dark theme's own prior
+     ~4.36:1 on `--color-focus` as that same fallback). */
+  --color-swatch-neutral: #949bab;
+  --color-swatch-break: #10b981;
+  --color-swatch-event: #818cf8;
+}
+
+/*
+ * Light palette. Same tokens as above, re-picked for a light desktop chrome instead of a
+ * dark one. Selected by `[data-theme="light"]` on `<html>` (set in App.tsx from
+ * `settings.theme`, live-following `matchMedia` only when the setting is 'system') rather
+ * than by `@media (prefers-color-scheme: light)` directly: whether Chromium ever feeds
+ * `nativeTheme.themeSource` (set from the same setting in src/main/index.ts) into that media
+ * query depends on the Linux desktop's colour-scheme portal being present, and on a bare
+ * X11/Xvfb session it doesn't — found while building this palette, where `settings.theme`
+ * correctly flipped `nativeTheme.shouldUseDarkColors` and each window's pre-paint background
+ * (`BrowserWindow#getBackgroundColor()`, in src/main/windows.ts) but `prefers-color-scheme`
+ * itself never moved, even in a brand-new window. The `data-theme` attribute sidesteps that
+ * gap entirely. This still overrides the `@theme` block's `:root` custom properties the same
+ * way (Tailwind v4 just emits those as plain CSS vars; every utility reads
+ * `var(--color-*)`, so replacing the variables under `[data-theme="light"]` is enough, no
+ * per-utility light variant needed — checked in the built CSS under out/renderer) — kept
+ * unlayered and after `@theme`/`@layer base` so it outranks them regardless of source order
+ * (unlayered CSS always beats layered CSS).
+ *
+ * `--color-surface` must stay exactly `#f6f7f9` — it's duplicated as `SURFACE.light` in
+ * `src/main/windows.ts` for each window's pre-paint background, and
+ * `tests/theme-surface.test.ts` checks the two never drift apart.
+ *
+ * `--color-text-muted` and every accent actually used as plain text on a surface
+ * (`--color-focus`, `--color-break`, `--color-danger`/`--color-p1`, `--color-p2` — grepped
+ * for `text-[var(--color-...)]` and `style={{ color: ...}}` across src/renderer) are darkened
+ * enough to clear WCAG AA's 4.5:1 against every light surface tone, including the sunken
+ * tooltip/cursor fill. That same darkening also lowers each one's luminance as a FILL — the
+ * "Start focus" button, the active range pill, a filled checkbox — below where the dark
+ * `--color-on-accent` from the palette above still reads on top of it, so `--color-on-accent`
+ * flips to a near-white here too (checked against every accent above: still >=5:1). `p3`/`p4`
+ * are never used as text (only small borders/fills/dots — priority rings, dots), so they're
+ * only darkened enough to stay clearly on-brand against the lighter surfaces, not to clear the
+ * text bar. `--color-on-swatch` and every `--color-swatch-*` token stay identical to the dark
+ * palette on purpose — see their comments above the `@theme` block.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-surface: #f6f7f9;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #eceef2;
+  --color-border: #dfe3e9;
+  --color-text: #14161c;
+  --color-text-muted: #5b6472;
+
+  --color-focus: #4f46e5;
+  --color-break: #047857;
+  --color-danger: #c81e45;
+
+  --color-p1: #c81e45;
+  --color-p2: #92400e;
+  --color-p3: #1d4ed8;
+  --color-p4: #57606f;
+
+  --color-on-accent: #f8fafc;
+  --color-border-hover: #c9ced6;
+  --color-surface-hover: #eef0f3;
+
+  /* Same values as dark, by rule — see the --color-on-swatch/--color-swatch-* comments
+     above the @theme block. tests/theme-surface.test.ts asserts this for the whole family. */
+  --color-on-swatch: #0a0d12;
+  --color-swatch-neutral: #949bab;
+  --color-swatch-break: #10b981;
+  --color-swatch-event: #818cf8;
 }
 
 @layer base {

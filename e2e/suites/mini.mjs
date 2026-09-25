@@ -98,6 +98,46 @@ export async function run(ctx = {}) {
     )
     await sleep(700) // past the 400ms debounce in index.ts's rememberMiniPosition
 
+    // ── Resizing: the countdown grows with the widget, and the size is remembered ──
+    const countdownPx = async () => {
+      const miniPage = getMiniPage(app)
+      if (!miniPage) return null
+      // The countdown is the one element sized by a clamp() font size (MiniWidget.tsx).
+      return miniPage.evaluate(() => {
+        const el = [...document.querySelectorAll('div')].find((d) => /^\d{1,2}(:\d\d){1,2}$/.test(d.textContent?.trim() ?? '') && d.children.length === 0)
+        return el ? parseFloat(getComputedStyle(el).fontSize) : null
+      })
+    }
+    const setMiniSize = (size) =>
+      app.evaluate(({ BrowserWindow }, s) => {
+        const w = BrowserWindow.getAllWindows()
+          .filter((x) => !x.isDestroyed() && !x.webContents.isDestroyed())
+          .find((x) => x.webContents.getURL().includes('mini'))
+        w?.setSize(s.width, s.height)
+      }, size)
+
+    const smallFont = await countdownPx()
+    const small = getMiniPage(app)
+    if (small) await small.screenshot({ path: join(outDir, 'mini-220x88.png') })
+
+    const resized = { width: 360, height: 150 }
+    await setMiniSize(resized)
+    await sleep(700) // past the 400ms debounce in index.ts's rememberMiniSize
+    const grown = await getMini(app)
+    check(
+      'mini widget resizes',
+      !!grown && grown.bounds.width === resized.width && grown.bounds.height === resized.height,
+      JSON.stringify(grown?.bounds)
+    )
+    const bigFont = await countdownPx()
+    check(
+      'the countdown grows with the widget',
+      smallFont != null && bigFont != null && bigFont > smallFont,
+      JSON.stringify({ at220x88: smallFont, at360x150: bigFont })
+    )
+    const big = getMiniPage(app)
+    if (big) await big.screenshot({ path: join(outDir, 'mini-360x150.png') })
+
     await quit(app)
 
     launched = await launch({ profile })
@@ -113,6 +153,24 @@ export async function run(ctx = {}) {
         Math.abs(afterRestart.bounds.y - dragged.y) <= 2,
       JSON.stringify({ dragged, got: afterRestart?.bounds })
     )
+    check(
+      'resized mini size persists across a restart',
+      !!afterRestart &&
+        afterRestart.bounds.width === resized.width &&
+        afterRestart.bounds.height === resized.height,
+      JSON.stringify({ resized, got: afterRestart?.bounds })
+    )
+
+    await setMiniSize({ width: 900, height: 600 })
+    await sleep(300)
+    const capped = await getMini(app)
+    check(
+      'the widget cannot grow past its maximum',
+      !!capped && capped.bounds.width <= 480 && capped.bounds.height <= 200,
+      JSON.stringify(capped?.bounds)
+    )
+    const maxPage = getMiniPage(app)
+    if (maxPage) await maxPage.screenshot({ path: join(outDir, 'mini-max.png') })
   } finally {
     if (app) await quit(app)
     profile.cleanup()

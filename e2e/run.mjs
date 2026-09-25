@@ -24,6 +24,7 @@ const ALL_SUITES = [
   'settings-persistence',
   'data',
   'mini',
+  'layout',
   'theme',
   'updates',
   'platform'

@@ -124,6 +124,24 @@
   --color-swatch-event: #818cf8;
 }
 
+/*
+ * Compact density. `[data-density="compact"]` on `<html>` (set in App.tsx from
+ * `settings.density`, both windows) scales Tailwind v4's `--spacing` base — every numeric
+ * spacing/sizing utility (`p-`, `m-`, `gap-`, `w-`/`h-` numeric, `inset-`, …) is a
+ * `calc(var(--spacing) * N)` in the built CSS (checked under out/renderer: e.g. `.gap-4{gap:
+ * calc(var(--spacing) * 4)}`, `.px-6{padding-inline:calc(var(--spacing) * 6)}`), so
+ * overriding this one variable rescales all of them together with no per-utility variant
+ * needed — the same trick `[data-theme="light"]` above uses for colour, and kept unlayered
+ * for the same reason (Tailwind's own `--spacing` lives in `@layer theme`; unlayered always
+ * outranks a layer regardless of source order). 0.25rem -> 0.2rem is a 20% cut, chosen (over
+ * something more aggressive) so it stays legible and nothing needed a smaller base font size
+ * on top of it — checked against the 760x560 MIN_SIZE window (src/main/windows.ts) in both
+ * densities, including the timer panel at its 300px PANEL_MIN_WIDTH.
+ */
+:root[data-density='compact'] {
+  --spacing: 0.2rem;
+}
+
 @layer base {
   :root {
     color-scheme: dark;

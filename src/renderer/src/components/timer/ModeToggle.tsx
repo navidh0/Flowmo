@@ -55,7 +55,13 @@ export function ModeToggle(): React.JSX.Element {
   const activeIndex = mode === 'flowmodoro' ? 1 : 0
 
   return (
-    <div className="relative" ref={rootRef}>
+    // `flex w-full justify-center`, not a bare `relative`: the pill itself stays exactly as
+    // wide as its content (still centred, `justify-center` does that job `items-center` on
+    // the parent column used to), but this box now spans the whole panel width — which is
+    // what lets the confirm popover below size itself against the PANEL's width instead of
+    // the narrower pill's, so it can shrink to fit at the panel's minimum instead of
+    // overflowing it (v0.4's known bug).
+    <div className="relative flex w-full justify-center" ref={rootRef}>
       <div
         role="radiogroup"
         aria-label="Timer mode"
@@ -88,7 +94,7 @@ export function ModeToggle(): React.JSX.Element {
         <>
           {/* Catches the click that dismisses the popover without stealing focus styling. */}
           <div className="fixed inset-0 z-20" onClick={() => setPending(null)} />
-          <div className="absolute top-[calc(100%+8px)] left-1/2 z-30 w-[292px] -translate-x-1/2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 shadow-2xl shadow-black/50">
+          <div className="absolute top-[calc(100%+8px)] left-1/2 z-30 w-full max-w-[292px] -translate-x-1/2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 shadow-2xl shadow-black/50">
             <p className="text-[12px] leading-relaxed text-[var(--color-text)]">
               {runningPhase ?? 'A session'} is in progress. Switching to{' '}
               <span className="font-medium">{MODE_LABEL[pending]}</span> ends it.

@@ -59,7 +59,7 @@ export default function SettingsPage(): React.JSX.Element {
         <HotkeysSection settings={settings} set={set} />
         <CalendarSection settings={settings} set={set} />
         <IntegrationsSection />
-        <LayoutSection set={set} />
+        <LayoutSection settings={settings} set={set} />
         <DataSection />
       </div>
     </div>

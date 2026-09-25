@@ -107,3 +107,63 @@ describe('mini widget position', () => {
     expect(settingsRepo.getMiniPosition()).toBeNull()
   })
 })
+
+describe('mini widget size', () => {
+  it('is null until the widget is first resized', () => {
+    expect(settingsRepo.getMiniSize()).toBeNull()
+  })
+
+  it('round-trips, and stays out of the Settings object', () => {
+    settingsRepo.setMiniSize({ width: 360, height: 150 })
+    expect(settingsRepo.getMiniSize()).toEqual({ width: 360, height: 150 })
+    expect(Object.keys(settingsRepo.get())).not.toContain('internal:miniSize')
+  })
+
+  it('is stored apart from the position, so one never overwrites the other', () => {
+    settingsRepo.setMiniPosition({ x: 40, y: 60 })
+    settingsRepo.setMiniSize({ width: 300, height: 120 })
+    expect(settingsRepo.getMiniPosition()).toEqual({ x: 40, y: 60 })
+    expect(settingsRepo.getMiniSize()).toEqual({ width: 300, height: 120 })
+  })
+
+  it.each([
+    ['not an object', '42'],
+    ['a missing dimension', '{"width":300}'],
+    ['a non-numeric dimension', '{"width":"300","height":120}'],
+    ['a non-finite dimension', '{"width":300,"height":null}'],
+    ['unparseable JSON', '{width:']
+  ])('reads %s as no saved size', (_label, json) => {
+    storeRaw('internal:miniSize', json)
+    expect(settingsRepo.getMiniSize()).toBeNull()
+  })
+})
+
+describe('density', () => {
+  it('defaults to comfortable', () => {
+    expect(DEFAULT_SETTINGS.density).toBe('comfortable')
+    expect(settingsRepo.get().density).toBe('comfortable')
+  })
+
+  it('round-trips compact', () => {
+    expect(settingsRepo.set({ density: 'compact' }).density).toBe('compact')
+    expect(settingsRepo.get().density).toBe('compact')
+  })
+
+  it.each([
+    ['an unknown name', '"cozy"'],
+    ['a non-string', '1'],
+    ['null', 'null'],
+    ['unparseable JSON', '{nope']
+  ])('falls back to the default for %s', (_label, json) => {
+    storeRaw('density', json)
+    expect(settingsRepo.get().density).toBe('comfortable')
+  })
+
+  it('a bad density costs only that key', () => {
+    settingsRepo.set({ theme: 'light' })
+    storeRaw('density', '"tiny"')
+    const s = settingsRepo.get()
+    expect(s.theme).toBe('light')
+    expect(s.density).toBe('comfortable')
+  })
+})

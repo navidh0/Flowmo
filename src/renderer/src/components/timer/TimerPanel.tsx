@@ -115,8 +115,18 @@ export function TimerPanel(): React.JSX.Element {
   return (
     // Scroll on the outer box with `min-h-full` inside: centring content in a scroll container
     // directly would make the top of it unreachable once it overflows a short window.
-    <div className="h-full w-full overflow-y-auto">
-      <section className="flex min-h-full w-full flex-col items-center justify-center gap-4 px-6 py-5">
+    //
+    // `overflow-x-hidden` alongside `overflow-y-auto` is deliberate, not decorative: per the
+    // CSS overflow spec, a box whose `overflow-y` isn't `visible` while `overflow-x` is left
+    // at its `visible` default gets `overflow-x` silently promoted to `auto` — so ANY child
+    // that ended up wider than this box (the 264px dial plus padding, at the panel's own
+    // 300px minimum, was one) turned into a horizontal scrollbar here (v0.4's known bug)
+    // instead of the clipping every other overflow-hidden ancestor in the shell gets. Pinning
+    // it to `hidden` restores that, and the children below are each sized (`px-3` instead of
+    // `px-6`, `max-w-[…]` popovers, a wrapping Controls row) to actually fit at that minimum
+    // rather than merely being clipped.
+    <div className="h-full w-full overflow-x-hidden overflow-y-auto">
+      <section className="flex min-h-full w-full flex-col items-center justify-center gap-4 px-3 py-5">
         <ModeToggle />
 
         <div className="flex h-7 shrink-0 items-center justify-center gap-4">

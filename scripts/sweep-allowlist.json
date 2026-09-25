@@ -79,12 +79,6 @@
   },
   {
     "rule": "fixed-width",
-    "file": "src/renderer/src/components/timer/EarnedBreak.tsx",
-    "match": "w-[320px]",
-    "reason": "Fixed-size popup card anchored under the timer, not a resizable shell panel."
-  },
-  {
-    "rule": "fixed-width",
     "file": "src/renderer/src/components/timer/ModeToggle.tsx",
     "match": "w-[calc(50%-0.25rem)]",
     "reason": "The sliding fill behind the two-option toggle — its width is tied to the pill's own geometry (half minus the padding gap), not a resizable panel."
@@ -94,12 +88,6 @@
     "file": "src/renderer/src/components/timer/ModeToggle.tsx",
     "match": "w-[112px]",
     "reason": "The two mode buttons must match the sliding fill's width above exactly, so both toggle options stay the same size — not a resizable panel."
-  },
-  {
-    "rule": "fixed-width",
-    "file": "src/renderer/src/components/timer/ModeToggle.tsx",
-    "match": "w-[292px]",
-    "reason": "Fixed-size confirmation popover anchored under the toggle, not a resizable shell panel."
   },
   {
     "rule": "fixed-width",

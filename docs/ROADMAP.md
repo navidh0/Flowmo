@@ -81,11 +81,14 @@ likely to change how the app gets used day to day.
 
 ## Next
 
-### v0.4 — Linux, and a real release pipeline
+### v0.4 — Linux, and updates
 
-- AppImage and `.deb` builds alongside the Windows installer.
+Windows CI and automatic releases arrived early, with 0.3.1: every change is typechecked,
+tested, built and driven end to end on Windows before it can merge, and a release publishes
+itself once that gate passes. v0.4 finishes the job.
+
+- AppImage and `.deb` builds alongside the Windows installer, built and smoke-tested in CI.
 - Automatic updates via GitHub Releases, with a manual check in Settings.
-- Continuous integration building and testing both platforms on every tagged release.
 - Graceful degradation where a platform genuinely cannot do something. Global hotkeys are
   unavailable under Wayland, for instance; the app says so rather than appearing to accept a
   binding that will never fire.
@@ -96,25 +99,65 @@ likely to change how the app gets used day to day.
 - **Real notification sounds**, replacing the current system beep.
 - **Layout, continued** — reorder the panels, a compact density mode, and a resizable mini widget.
 
+### v0.6 — your data, your call
+
+Deleting your data should be as deliberate and as easy as exporting it.
+
+- **Delete everything** — one place in Settings that removes your history, settings, backups
+  and stored credentials, after offering an export first.
+- **Delete a range of history** — sessions between two dates, optionally for one project, with
+  a preview of exactly what goes before anything does.
+- **Purge integration data** — disconnecting Todoist or a calendar can also remove what it
+  brought in, not just the token. Nothing is ever deleted on the provider's side.
+- **Remove data on uninstall** — the Windows uninstaller offers to delete your data (unticked
+  by default, and never during an update).
+
+### v0.7 — Google Calendar over OAuth
+
+For calendars that can't expose a secret iCal address, and as a sturdier alternative to it.
+Installed-app OAuth with PKCE and a loopback redirect, read-only scope, no client secret in
+the code — the repository is public.
+
+### v0.8 — Jira
+
+An additional task source alongside Todoist, read-only to begin with. Synced issues are marked
+as such and link back to Jira.
+
 ---
 
 ## Planned
 
-### Hardening toward v1.0
+### v1.0 — hardening
 
-Keyboard navigation throughout, proper error and offline states for every integration, a
-first-run onboarding pass, a data-integrity review covering backup and restore, and a privacy
-statement covering exactly what the integrations read and where credentials live.
+Turns a working personal tool into one a stranger can rely on.
 
-### Later, unscheduled
+- **The background services** — Todoist sync, calendar fetching, the timer and the database —
+  each get defined behaviour for being offline, rate-limited, revoked, sent malformed data or
+  interrupted mid-write, and say so in the UI rather than showing stale data as current.
+- **Data integrity** — the database is checked on open and never silently replaced by an
+  empty one; backups can be browsed and restored from inside the app; every shipped schema
+  version is migrated in tests.
+- **Electron security review** — navigation and permission lockdown, a content security
+  policy, runtime fuses, and every message from a window validated before it's acted on.
+- Keyboard navigation throughout, a first-run onboarding pass, and a privacy statement covering
+  exactly what the integrations read and where credentials live.
 
-- **Jira**, as an additional read-only task source alongside Todoist.
-- **Google Calendar over OAuth**, for calendars that can't expose a secret iCal address (or as a
-  more robust alternative to it).
-- **A move off TypeScript to Go or Rust** — most likely the main process first (timer, storage
-  and sync), with the existing test suite as the specification the port has to pass.
+### v2.0 — off TypeScript
+
+A move to Go or Rust, most likely the main process first (timer, storage and sync), with the
+existing test suite as the specification the port has to pass. Which language is decided by a
+small spike after v1.0 — porting the timer and database layer both ways and comparing — rather
+than up front.
 
 ---
+
+## The standard every release meets
+
+- Typecheck, the full unit suite, a real build and an end-to-end run of the built app, on
+  Windows, before anything merges.
+- A release publishes only from a commit that passed all of that, with written release notes.
+- Credentials only ever in the operating system's secure storage, and never in an export.
+- Your data is never deleted without you asking, and never touched by an update.
 
 ## Not planned
 

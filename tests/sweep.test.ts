@@ -411,3 +411,42 @@ describe('parseCommitLog', () => {
     expect(parseCommitLog('')).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------------------
+// CRLF sources (Windows checkout) — a real regression: `content.split('\n')` used to leave
+// every line ending in a stray '\r', and line numbers/violation text were wrong past line 1.
+// ---------------------------------------------------------------------------------------
+
+describe('CRLF sources', () => {
+  const FILE = 'src/renderer/src/components/widget/Thing.tsx'
+
+  it('finds a hex-colour violation on the right line when the file is CRLF', () => {
+    const crlf = `const a = 1\r\nconst cls = 'text-[#0a0d12]'\r\nconst b = 2\r\n`
+    const violations = scanSource(FILE, crlf)
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toMatchObject({ rule: 'hex-colour', line: 2 })
+    // The captured line/context must not carry a trailing '\r' into the match.
+    expect(violations[0]?.context.endsWith('\r')).toBe(false)
+  })
+
+  it('finds a fixed-width violation on the right line when the file is CRLF', () => {
+    const crlf = `const a = 1\r\nconst b = 2\r\nconst cls = 'w-[320px]'\r\n`
+    const violations = scanSource(FILE, crlf)
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toMatchObject({ rule: 'fixed-width', line: 3 })
+  })
+
+  it('still skips a CRLF comment line for iso-date', () => {
+    const crlf = `/**\r\n * never toISOString() here\r\n */\r\nexport const x = 1\r\n`
+    expect(scanSource(FILE, crlf).filter((v) => v.rule === 'iso-date')).toHaveLength(0)
+  })
+
+  it('reports the right line number for a layer-import violation when the file is CRLF', () => {
+    const crlf = `import { useState } from 'react'\r\nimport { app } from 'electron'\r\n`
+    const violations = scanSource('src/renderer/src/App.tsx', crlf)
+    const layerViolations = violations.filter((v) => v.rule === 'layer-import')
+    expect(layerViolations).toHaveLength(1)
+    expect(layerViolations[0]).toMatchObject({ line: 2 })
+    expect(layerViolations[0]?.context.endsWith('\r')).toBe(false)
+  })
+})

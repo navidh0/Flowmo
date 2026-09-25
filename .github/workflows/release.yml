@@ -1,7 +1,10 @@
 # Publishes a release when main carries a version that has no tag yet — bump package.json,
-# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the full CI gate again, the
-# Windows installers, an annotated tag, and a GitHub Release with the notes and both
-# artefacts. Nothing is published unless every check passes on this exact commit.
+# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the full CI gate again,
+# installers for Windows and Linux (each carrying electron-updater's update-feed file,
+# latest.yml / latest-linux.yml, so installed apps can discover the new version), an
+# annotated tag, and a GitHub Release with the notes and every artefact. Nothing is
+# published unless every check passes on this exact commit and every expected file is
+# actually present to upload.
 name: Release
 
 on:
@@ -45,14 +48,11 @@ jobs:
     if: needs.detect.outputs.needed == 'true'
     uses: ./.github/workflows/ci.yml
 
-  publish:
+  build-windows:
     needs: [detect, gate]
     if: needs.detect.outputs.needed == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
-    env:
-      VERSION: ${{ needs.detect.outputs.version }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -64,9 +64,90 @@ jobs:
         run: npm run build && npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - name: Tag and publish
-        shell: bash
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          # The NSIS blockmap and latest.yml are electron-updater's Windows update feed;
+          # they must ship alongside the installers or installed apps can never see this
+          # version.
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          if-no-files-found: error
+
+  build-linux:
+    needs: [detect, gate]
+    if: needs.detect.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build packages
+        run: npm run build && npx electron-builder --linux --publish never
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          # latest-linux.yml is electron-updater's Linux (AppImage) update feed. The
+          # AppImage blockmap is only sometimes produced, so it's a best-effort glob rather
+          # than a required file.
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest-linux.yml
+          if-no-files-found: error
+
+  publish:
+    needs: [detect, build-windows, build-linux]
+    if: needs.detect.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download build artefacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+      - name: Verify every expected file is present
         run: |
+          set -euo pipefail
+          missing=()
+          check() {
+            if [ ! -f "$1" ]; then
+              missing+=("$1")
+            fi
+          }
+          # Windows: NSIS + portable installers, the NSIS blockmap, and the Windows update
+          # feed.
+          check "dist/release-windows/Flowdo-Setup-$VERSION.exe"
+          check "dist/release-windows/Flowdo-Setup-$VERSION.exe.blockmap"
+          check "dist/release-windows/Flowdo-$VERSION-portable.exe"
+          check "dist/release-windows/latest.yml"
+          # Linux: AppImage + deb, and the Linux update feed. The AppImage blockmap is not
+          # required: electron-builder doesn't always produce one.
+          check "dist/release-linux/Flowdo-$VERSION.AppImage"
+          check "dist/release-linux/flowdo_${VERSION}_amd64.deb"
+          check "dist/release-linux/latest-linux.yml"
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Release v$VERSION is missing expected files; refusing to publish a partial release:"
+            printf '::error::  %s\n' "${missing[@]}"
+            echo "--- actual contents of dist/ ---"
+            find dist -maxdepth 2 -type f
+            exit 1
+          fi
+      - name: Tag and publish
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           title=$(head -n 1 "docs/releases/v$VERSION.md" | sed 's/^# *//')
@@ -76,7 +157,9 @@ jobs:
           # files once stalled as an empty draft (release skill, v0.3.0).
           tail -n +2 "docs/releases/v$VERSION.md" > "$RUNNER_TEMP/notes.md"
           gh release create "v$VERSION" --verify-tag --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
-          for f in "release/Flowdo-Setup-$VERSION.exe" "release/Flowdo-$VERSION-portable.exe"; do
+          # latest.yml and latest-linux.yml must keep these exact names on the release:
+          # electron-updater requests them by name from the latest GitHub release.
+          for f in dist/release-windows/* dist/release-linux/*; do
             gh release upload "v$VERSION" "$f" --clobber
           done
           gh release view "v$VERSION" --json assets --jq '.assets[] | "\(.name) \(.size)"'

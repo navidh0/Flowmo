@@ -22,6 +22,7 @@ import { IntegrationsSection } from './integrations'
 import { LayoutSection } from './sections/LayoutSection'
 import { SystemSection } from './sections/SystemSection'
 import { TimerSection } from './sections/TimerSection'
+import { UpdatesSection } from './sections/UpdatesSection'
 
 export default function SettingsPage(): React.JSX.Element {
   const settings = useTimerStore((s) => s.settings)
@@ -54,6 +55,7 @@ export default function SettingsPage(): React.JSX.Element {
         <FlowmodoroSection settings={settings} set={set} />
         <BehaviorSection settings={settings} set={set} />
         <SystemSection settings={settings} set={set} />
+        <UpdatesSection settings={settings} set={set} />
         <HotkeysSection settings={settings} set={set} />
         <CalendarSection settings={settings} set={set} />
         <IntegrationsSection />

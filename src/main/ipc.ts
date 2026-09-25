@@ -28,6 +28,7 @@ import type { TimerService } from './timer'
 import { getHotkeyFailures, probeHotkey, setHotkeysSuspended } from './hotkeys'
 import type { TodoistIntegration } from './integrations/todoist'
 import type { CalendarIntegration } from './integrations/ical'
+import type { Updater } from './updater'
 import { exportJson, importJson } from './dataio'
 import * as projectsRepo from './db/repo/projects'
 import * as tasksRepo from './db/repo/tasks'
@@ -48,6 +49,7 @@ export interface IpcContext {
   reloadAfterImport(): void
   todoist: TodoistIntegration
   calendars: CalendarIntegration
+  updater: Updater
 }
 
 /**
@@ -245,6 +247,12 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     }
     return ctx.applySettingsPatch(patch)
   })
+
+  // ── updates ──
+  ipcMain.handle(CH.updates.check, () => ctx.updater.check())
+  ipcMain.handle(CH.updates.getStatus, () => ctx.updater.getStatus())
+  // Rejects with a readable message while a session is running; the renderer shows it.
+  ipcMain.handle(CH.updates.installNow, () => ctx.updater.installNow())
 
   // ── app ──
   ipcMain.handle(CH.app.getVersion, () => app.getVersion())

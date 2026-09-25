@@ -15,7 +15,16 @@ files:
 npmRebuild: false
 asar: true
 
-publish: null
+# A provider must be configured for electron-builder to write the update-feed files
+# (latest.yml, latest-linux.yml) and embed app-update.yml in the packaged app — even
+# though every CI build still runs with `--publish never` and CI itself uploads the
+# release assets to GitHub. Without a provider here those feed files are simply not
+# generated at all, which is not what "never auto-publish" is meant to mean.
+publish:
+  provider: github
+  owner: navidh0
+  repo: Flowmo
+  releaseType: release
 
 win:
   icon: build/icon.png
@@ -26,6 +35,53 @@ win:
     - target: portable
       arch:
         - x64
+
+linux:
+  icon: build/icon.png
+  synopsis: Pomodoro + Flowmodoro time tracker
+  description: >-
+    Flowdo is a Pomodoro and Flowmodoro time tracker with tasks, for people who
+    want a lightweight focus timer that stays out of the way.
+  category: Utility
+  # Named explicitly (rather than left to the default) so the on-disk binary,
+  # the .desktop file's Icon/Exec keys, and StartupWMClass below all agree on
+  # the same string. It also happens to match electron-builder's own default
+  # (appInfo.sanitizedName.toLowerCase(), i.e. package.json "name" lowercased).
+  executableName: flowdo
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  desktop:
+    entry:
+      # Electron's WM_CLASS/app_id on Linux, and the .desktop file that
+      # `setProgressBar`'s Unity integration looks for, both come from
+      # `app.getName()` when neither `app.setDesktopName()` nor a `desktopName`
+      # field in package.json is set (see electron.d.ts on setDesktopName and
+      # on setProgressBar: "it will assume `{app.name}.desktop`"). Neither is
+      # set in this app (package.json is out of scope here), and app.getName()
+      # falls back to package.json's "name" field: "flowdo" — NOT this file's
+      # `productName: Flowdo`. electron-builder's own StartupWMClass default
+      # falls back to productName ("Flowdo") when no package.json desktopName
+      # is present, which would mismatch the runtime WM_CLASS, so it is
+      # overridden here to match. The generated .desktop file is already named
+      # after `executableName` (flowdo.desktop), which independently matches
+      # what setProgressBar expects, so no further change is needed for Unity
+      # progress-bar / taskbar association to work.
+      StartupWMClass: flowdo
+
+appImage:
+  artifactName: ${productName}-${version}.${ext}
+
+deb:
+  artifactName: ${name}_${version}_${arch}.${ext}
+  maintainer: Navid <109043071+navidh0@users.noreply.github.com>
+  # electron-builder's default `depends` (gconf2/gconf-service or the GTK/nss
+  # equivalents it detects) already cover what an Electron app needs on
+  # Debian/Ubuntu — nothing app-specific to add here.
 
 nsis:
   # A real installer with a directory choice, not a one-click that drops the app in

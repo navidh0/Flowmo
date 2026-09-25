@@ -48,8 +48,13 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: windows-installers
+          # release/*.blockmap and latest.yml are the NSIS update feed electron-updater
+          # polls for; surfacing them here means a broken feed shows up in PR CI, not only
+          # after a real release publish.
           path: |
             release/*.exe
+            release/*.blockmap
+            release/latest.yml
           if-no-files-found: error
 
   linux-suite:
@@ -67,6 +72,15 @@ jobs:
       - run: npm run build
       - name: End-to-end smoke (Xvfb has no window manager, so no minimize)
         run: xvfb-run -a -s "-screen 0 1500x950x24" npm run e2e -- --no-minimize
+      - name: Package Linux packages
+        run: npx electron-builder --linux --publish never
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
 
   # Fast, dependency-light checks that don't need a Windows/Linux build+e2e round trip:
   # the project's own mechanical invariants (scripts/sweep.mjs) and a production-dependency

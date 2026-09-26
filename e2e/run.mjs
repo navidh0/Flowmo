@@ -20,6 +20,7 @@ const ALL_SUITES = [
   'timer',
   'tasks',
   'calendar',
+  'timeline',
   'stats',
   'settings-persistence',
   'data',

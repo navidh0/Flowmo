@@ -122,10 +122,13 @@ jobs:
       # openbox gives e2e/xvfb-wm.sh a window manager under Xvfb, so minimize behaves the
       # same as it does on Windows; xvfb-run itself ships on the ubuntu-latest image already,
       # but is included here too in case that image assumption ever changes.
-      - name: Install openbox (+ Xvfb)
+      # dbus-x11 + gnome-keyring give the timeline suite a Secret Service to start, so
+      # Electron's safeStorage works and calendars.add() can seed real calendar events here,
+      # as it can on Windows via DPAPI. Without them the suite's calendar checks would SKIP.
+      - name: Install openbox (+ Xvfb, D-Bus, gnome-keyring)
         run: |
           sudo apt-get update
-          sudo apt-get install -y openbox xvfb
+          sudo apt-get install -y openbox xvfb dbus-x11 gnome-keyring
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

@@ -1,12 +1,20 @@
 /**
  * The 00–24 hour grid: gridlines from `hourMarks` (DST-correct — see `layout.ts`), blocks
- * positioned by `dayFraction`, overlapping blocks laid out side by side by `layoutOverlaps`,
- * and a now-line when the day shown is today. Auto-scrolls to now once, on mount, for
- * today only — never on a past/future day, where "now" is off-grid or meaningless.
+ * positioned by `dayFraction`, and a now-line when the day shown is today. Auto-scrolls to
+ * now once, on mount, for today only — never on a past/future day, where "now" is off-grid
+ * or meaningless.
+ *
+ * Blocks are laid out in two layers by `layoutTimeline`, not one shared `layoutOverlaps`:
+ * calendar events form a full-width background layer (columned only among themselves) and
+ * sessions form a foreground layer drawn on top (columned only among themselves), so a focus
+ * session no longer squeezes into a narrow column next to an unrelated event. `layoutTimeline`
+ * returns events before sessions and this component renders them in that order — that DOM
+ * order, not a z-index, is what puts sessions visually above events (see `Block.tsx`'s header
+ * for why a z-index here would trap an event's hover card).
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { dayFraction, hourMarks, layoutOverlaps, type DayBounds } from './layout'
+import { dayFraction, hourMarks, layoutTimeline, type DayBounds } from './layout'
 import { formatHourMark } from './format'
 import { Block } from './Block'
 import type { TimelineBlock } from './blocks'
@@ -52,7 +60,7 @@ export function HourGrid({ bounds, blocks, isToday }: HourGridProps): React.JSX.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isToday])
 
-  const placements = layoutOverlaps(blocks)
+  const placements = layoutTimeline(blocks)
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
@@ -80,7 +88,7 @@ export function HourGrid({ bounds, blocks, isToday }: HourGridProps): React.JSX.
             />
           ))}
 
-          {placements.map(({ item, column, columns }) => (
+          {placements.map(({ item, column, columns, layer, overEvent }) => (
             <Block
               key={item.id}
               block={item}
@@ -88,6 +96,8 @@ export function HourGrid({ bounds, blocks, isToday }: HourGridProps): React.JSX.
               columns={columns}
               startFraction={dayFraction(item.startMs, bounds)}
               endFraction={dayFraction(item.endMs, bounds)}
+              layer={layer}
+              overEvent={overEvent}
             />
           ))}
 

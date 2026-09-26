@@ -142,6 +142,11 @@ Released 2026-09-25.
 - Windows taskbar, Start menu and shortcuts show the Flowdo icon: the exe's icon now has bitmap images at small sizes.
 - The mini widget's × works: it moved out of the corner, where Windows took the click for resizing or dragging.
 
+### v0.5.2 — your sessions on top of your calendar
+
+- Sessions draw on top of calendar events instead of squeezed beside them.
+- Events are tinted with a left stripe; sessions stay solid, unmistakable even when colors overlap.
+
 ## Next
 
 v0.6 (data removal) and v1.0 (hardening) are paused after v0.5 until restarted.

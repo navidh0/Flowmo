@@ -146,6 +146,48 @@ export function layoutOverlaps<T extends OverlapInterval>(items: T[]): OverlapPl
   return result
 }
 
+export interface TimelinePlacement<T extends OverlapInterval> extends OverlapPlacement<T> {
+  /** 'event' for calendar events, 'session' for focus/break/running blocks. */
+  layer: 'event' | 'session'
+  /** Sessions only: true when the session overlaps any event in time (touching end-to-start
+   *  doesn't count). Always false for events. */
+  overEvent: boolean
+}
+
+/**
+ * Layered layout for the Day/Week timeline: calendar events form a full-width background
+ * layer, columned only among themselves via `layoutOverlaps`, and sessions (focus/break/
+ * running) form a foreground layer columned only among themselves. A focus session during a
+ * calendar event no longer splits either into narrow side-by-side columns — the event still
+ * gets `columns: 1` and the session is simply flagged `overEvent` so the renderer can paint it
+ * solid over the event's translucent tint.
+ *
+ * Returns every event placement first, then every session placement — the renderer relies on
+ * that DOM order to paint sessions over events with no z-index.
+ */
+export function layoutTimeline<T extends OverlapInterval & { kind: string }>(
+  items: T[]
+): TimelinePlacement<T>[] {
+  const events = items.filter((it) => it.kind === 'event')
+  const sessions = items.filter((it) => it.kind !== 'event')
+
+  const eventPlacements: TimelinePlacement<T>[] = layoutOverlaps(events).map((p) => ({
+    ...p,
+    layer: 'event',
+    overEvent: false
+  }))
+
+  const sessionPlacements: TimelinePlacement<T>[] = layoutOverlaps(sessions).map((p) => ({
+    ...p,
+    layer: 'session',
+    overEvent: events.some(
+      (e) => p.item.startMs < e.endMs && e.startMs < p.item.endMs
+    )
+  }))
+
+  return [...eventPlacements, ...sessionPlacements]
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Week and month ranges
 // ─────────────────────────────────────────────────────────────────────────────

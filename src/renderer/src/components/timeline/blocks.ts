@@ -106,6 +106,20 @@ export function eventColor(feedId: number, feedColors: Map<number, string>): str
   return feedColors.get(feedId) ?? EVENT_COLOR
 }
 
+/** Mix percentage for a calendar event's background tint (see `eventFill`) — kept as a named
+ *  constant so `tests/event-tint-contrast.test.ts` checks contrast against this same number. */
+export const EVENT_TINT_PERCENT = 22
+
+/** Inline-style values for a calendar event's block in the Day/Week grid. The tint keeps at
+ *  least 78% surface, so --color-text stays readable on every swatch in both themes
+ *  (tests/event-tint-contrast.test.ts). */
+export function eventFill(color: string): { background: string; borderLeft: string } {
+  return {
+    background: `color-mix(in srgb, ${color} ${EVENT_TINT_PERCENT}%, var(--color-surface))`,
+    borderLeft: `3px solid ${color}`
+  }
+}
+
 /** Timed calendar events overlapping the day, clipped the same way a session is. All-day
  *  events are handled separately by the all-day row, never mixed into the hour grid.
  *

@@ -19,6 +19,7 @@ import {
   isInMonth,
   isSameLocalDay,
   layoutOverlaps,
+  layoutTimeline,
   localDayBounds,
   localWeekBounds,
   monthAnchor,
@@ -235,6 +236,87 @@ describe('layoutOverlaps', () => {
 
   it('is empty for an empty input', () => {
     expect(layoutOverlaps([])).toEqual([])
+  })
+})
+
+describe('layoutTimeline', () => {
+  type Item = { id: string; startMs: number; endMs: number; kind: string }
+
+  it('keeps an event at columns: 1, layer: event, when overlapped by two sequential sessions', () => {
+    const items: Item[] = [
+      { id: 'e', startMs: 0, endMs: 200, kind: 'event' },
+      { id: 's1', startMs: 0, endMs: 100, kind: 'focus' },
+      { id: 's2', startMs: 100, endMs: 200, kind: 'break' }
+    ]
+    const placed = layoutTimeline(items)
+    const byId = Object.fromEntries(placed.map((p) => [p.item.id, p]))
+    expect(byId.e).toMatchObject({ column: 0, columns: 1, layer: 'event', overEvent: false })
+  })
+
+  it('still gives two overlapping events 2 columns between them', () => {
+    const items: Item[] = [
+      { id: 'e1', startMs: 0, endMs: 100, kind: 'event' },
+      { id: 'e2', startMs: 50, endMs: 150, kind: 'event' }
+    ]
+    const placed = layoutTimeline(items)
+    const byId = Object.fromEntries(placed.map((p) => [p.item.id, p]))
+    expect(byId.e1!.columns).toBe(2)
+    expect(byId.e2!.columns).toBe(2)
+    expect(byId.e1!.column).not.toBe(byId.e2!.column)
+    expect(byId.e1!.layer).toBe('event')
+    expect(byId.e2!.layer).toBe('event')
+  })
+
+  it('gives a session overlapping an event columns: 1 (not 2) and overEvent: true', () => {
+    const items: Item[] = [
+      { id: 'e', startMs: 0, endMs: 100, kind: 'event' },
+      { id: 's', startMs: 50, endMs: 150, kind: 'focus' }
+    ]
+    const placed = layoutTimeline(items)
+    const byId = Object.fromEntries(placed.map((p) => [p.item.id, p]))
+    expect(byId.e).toMatchObject({ column: 0, columns: 1, layer: 'event' })
+    expect(byId.s).toMatchObject({ column: 0, columns: 1, layer: 'session', overEvent: true })
+  })
+
+  it('does not count a session touching an event end-to-start as overEvent', () => {
+    const items: Item[] = [
+      { id: 'e', startMs: 0, endMs: 100, kind: 'event' },
+      { id: 's', startMs: 100, endMs: 200, kind: 'focus' }
+    ]
+    const placed = layoutTimeline(items)
+    const byId = Object.fromEntries(placed.map((p) => [p.item.id, p]))
+    expect(byId.s!.overEvent).toBe(false)
+  })
+
+  it('treats running-focus and running-break as sessions', () => {
+    const items: Item[] = [
+      { id: 'rf', startMs: 0, endMs: 100, kind: 'running-focus' },
+      { id: 'rb', startMs: 200, endMs: 300, kind: 'running-break' }
+    ]
+    const placed = layoutTimeline(items)
+    const byId = Object.fromEntries(placed.map((p) => [p.item.id, p]))
+    expect(byId.rf!.layer).toBe('session')
+    expect(byId.rb!.layer).toBe('session')
+  })
+
+  it('returns every event before every session, regardless of input order', () => {
+    const items: Item[] = [
+      { id: 's1', startMs: 300, endMs: 400, kind: 'focus' },
+      { id: 'e1', startMs: 0, endMs: 100, kind: 'event' },
+      { id: 's2', startMs: 500, endMs: 600, kind: 'break' },
+      { id: 'e2', startMs: 100, endMs: 200, kind: 'event' }
+    ]
+    const placed = layoutTimeline(items)
+    const layers = placed.map((p) => p.layer)
+    const lastEvent = layers.lastIndexOf('event')
+    const firstSession = layers.indexOf('session')
+    expect(lastEvent).toBeLessThan(firstSession === -1 ? Infinity : firstSession)
+    expect(placed.filter((p) => p.layer === 'event')).toHaveLength(2)
+    expect(placed.filter((p) => p.layer === 'session')).toHaveLength(2)
+  })
+
+  it('is empty for an empty input', () => {
+    expect(layoutTimeline([])).toEqual([])
   })
 })
 

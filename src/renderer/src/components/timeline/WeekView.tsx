@@ -7,6 +7,15 @@
  * Columns have a readable minimum width; a panel narrower than 7 columns' worth scrolls
  * horizontally rather than squashing them (`MIN_COLUMN_PX` + `overflow-x-auto`, no `w-[…]`
  * on the columns themselves — only the minimum is fixed, the columns still flex).
+ *
+ * The auto-scroll-to-now effect below scrolls the OUTER `overflow-auto` div (`scrollRef`) —
+ * the sticky column headers and all-day row live above the hour-grid body inside that same
+ * scroll container, so `scrollRef` used to sit on the grid body div itself (no `overflow` of
+ * its own — a plain, non-scrolling element `.scrollTop` never does anything to). That silently
+ * made the whole effect a no-op: Week view always opened scrolled to 00:00, "now" wherever it
+ * fell. `gridBodyRef` is what a scroll target is computed relative to now (its own offset
+ * inside the scrollable content, via `getBoundingClientRect()` — cheaper and no more fragile
+ * than hard-coding the header/all-day-row heights it would otherwise need to add up).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -20,6 +29,7 @@ import {
   hourMarks,
   isSameLocalDay,
   layoutOverlaps,
+  layoutTimeline,
   localDayBounds,
   weekDays,
   type DayBounds
@@ -75,15 +85,24 @@ export function WeekView({
   )
 
   const now = useNow(true)
+  // `scrollRef`: the actual scroll container (sticky headers + all-day row + the hour-grid
+  // body all live inside it). `gridBodyRef`: the hour-grid body itself, so the target scroll
+  // offset can be computed relative to wherever it actually starts, instead of hard-coding
+  // the header/all-day-row heights above it.
   const scrollRef = useRef<HTMLDivElement>(null)
+  const gridBodyRef = useRef<HTMLDivElement>(null)
   const todayIndex = days.findIndex((d) => isSameLocalDay(now, d))
 
   useEffect(() => {
-    if (todayIndex === -1 || !scrollRef.current) return
+    if (todayIndex === -1 || !scrollRef.current || !gridBodyRef.current) return
     const bounds = columnBounds[todayIndex]
     if (!bounds) return
-    const top = dayFraction(now, bounds) * maxRows * ROW_HEIGHT_PX
-    scrollRef.current.scrollTop = Math.max(0, top - scrollRef.current.clientHeight / 3)
+    const container = scrollRef.current
+    const gridBody = gridBodyRef.current
+    const gridBodyOffset =
+      gridBody.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+    const top = gridBodyOffset + dayFraction(now, bounds) * maxRows * ROW_HEIGHT_PX
+    container.scrollTop = Math.max(0, top - container.clientHeight / 3)
     // Only when the shown week changes to include today — see HourGrid's identical note.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorMs])
@@ -104,7 +123,7 @@ export function WeekView({
   const allDayRows = allDayPlacements.length > 0 ? Math.max(...allDayPlacements.map((p) => p.columns)) : 0
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+    <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-auto">
       <div className="min-w-fit">
         {/* Column headers */}
         <div
@@ -168,7 +187,7 @@ export function WeekView({
 
         {/* Hour grid body */}
         <div
-          ref={scrollRef}
+          ref={gridBodyRef}
           className="grid"
           style={{ gridTemplateColumns, height: `${maxRows * ROW_HEIGHT_PX}px` }}
         >
@@ -193,7 +212,10 @@ export function WeekView({
               ...eventBlocks(calendarEvents, bounds, feedColors),
               ...(running ? [running] : [])
             ]
-            const placements = layoutOverlaps(blocks)
+            // Layered like HourGrid: events form a full-width background layer, sessions a
+            // foreground layer drawn on top in DOM order — see Block.tsx's header for why
+            // that's DOM order and never a z-index.
+            const placements = layoutTimeline(blocks)
 
             return (
               <div
@@ -209,7 +231,7 @@ export function WeekView({
                   />
                 ))}
 
-                {placements.map(({ item, column, columns }) => (
+                {placements.map(({ item, column, columns, layer, overEvent }) => (
                   <Block
                     key={item.id}
                     block={item}
@@ -217,6 +239,8 @@ export function WeekView({
                     columns={columns}
                     startFraction={dayFraction(item.startMs, bounds)}
                     endFraction={dayFraction(item.endMs, bounds)}
+                    layer={layer}
+                    overEvent={overEvent}
                   />
                 ))}
 

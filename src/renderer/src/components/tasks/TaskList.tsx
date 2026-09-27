@@ -15,6 +15,11 @@
  * for what is two events and an array splice — and commits through `reorderTasks`, which
  * applies the new order optimistically and rolls it back if main rejects it. Alt+↑/↓ does
  * the same thing from the keyboard, because a drag-only feature is a mouse-only feature.
+ *
+ * The Today header carries a `SyncNowButton` (Upcoming does not — it isn't the "what does
+ * my day look like right now" view this exists for) so pulling Todoist and refreshing
+ * calendar feeds doesn't require a trip to Settings. See that component's own header for why
+ * it talks to the integrations bridge directly instead of through a store.
  */
 
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
@@ -23,6 +28,7 @@ import { Button } from '@renderer/components/timer/Button'
 import { formatDueGroupLabel } from '@renderer/lib/format'
 import { useTasksStore } from '@renderer/stores/tasks'
 import { ChevronIcon, EmptyListIcon, PlusIcon } from './icons'
+import { SyncNowButton } from './SyncNowButton'
 import { TaskRow, type RowDrag } from './TaskRow'
 import { FIELD, SectionLabel } from './ui'
 import { countUpcoming, selectToday, selectUpcoming } from './views'
@@ -223,6 +229,7 @@ export function TaskList(): React.JSX.Element {
           <span className="tabular shrink-0 text-[12px] text-[var(--color-text-muted)]">
             {openCount} open
           </span>
+          {smartView === 'today' ? <SyncNowButton className="ml-auto shrink-0" /> : null}
         </header>
 
         <div className="px-4 pb-2.5">

@@ -77,8 +77,9 @@ marks it rather than removing it, and you choose whether to keep it as a local
 task or delete it.
 
 Sync runs every few minutes and again whenever you bring the window back into
-focus. Changes you make while offline are queued and sent once you're back
-online.
+focus. The Today view header has a **Sync now** button to pull Todoist and refresh
+calendar feeds immediately — one click, both in parallel, without opening Settings.
+Changes you make while offline are queued and sent once you're back online.
 
 Disconnecting turns your synced tasks into ordinary local tasks — it never
 deletes them, and it never deletes the time already logged against them.

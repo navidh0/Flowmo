@@ -140,8 +140,16 @@ export function onMain(app, fnBody) {
   }, fnBody)
 }
 
+/**
+ * The live mini widget's page: the NEWEST mini page that isn't closed. app.windows() lists
+ * pages in creation order, and a widget closed a moment ago stays in that list until
+ * Playwright processes its close event. The old find() picked that stale page first, and a
+ * click on it failed with "Target page, context or browser has been closed". That crashed the
+ * mini suite once on a loaded CI runner, right after the unpin step closed the previous widget.
+ */
 export function getMiniPage(app) {
-  return app.windows().find((p) => p.url().includes('mini')) ?? null
+  const pages = app.windows().filter((p) => !p.isClosed() && p.url().includes('mini'))
+  return pages.at(-1) ?? null
 }
 
 export async function getWorkArea(app) {

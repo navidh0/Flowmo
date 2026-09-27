@@ -1,23 +1,45 @@
-# The gate every change passes: typecheck, unit tests, a real build, and the full end-to-end
-# suite run against every artefact the project actually ships — the unpackaged build, the
-# packaged executable, and the installed app — on both platforms, plus a packaging drift
-# check of each platform's release/ output. Both platforms now have a window manager on CI
-# (Windows always has one; Linux gets openbox under Xvfb via e2e/xvfb-wm.sh), so minimize is
-# exercised everywhere (v0.4 ports the app itself, and ships a Linux AppImage + deb alongside
-# the existing Windows NSIS installer + portable exe).
+# The gate every change passes: typecheck, unit tests, a real build, a packaging drift check
+# of each platform's release/ output, and one end-to-end run against the actual packaged app
+# (not just the unpackaged dev build) on both platforms. That's the PR gate, run once per PR
+# (not once per push and again per pull_request sync). The release gate is this same workflow
+# called with `release: true`: on top of everything above it also installs the packaged app
+# (NSIS on Windows, deb on Linux) and re-runs the full e2e suite against the *installed* copy
+# — the one artefact shape a real release ships that ordinary PR CI doesn't need to re-prove
+# on every push. Both platforms now have a window manager on CI (Windows always has one; Linux
+# gets openbox under Xvfb via e2e/xvfb-wm.sh), so minimize is exercised everywhere (v0.4 ports
+# the app itself, and ships a Linux AppImage + deb alongside the existing Windows NSIS
+# installer + portable exe).
 name: CI
 
 on:
-  push:
-    branches: [main, 'claude/**']
   pull_request:
+    # A docs-only change can't affect typecheck/tests/build/e2e/drift, so skip the round trip.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_call:
+    inputs:
+      # release.yml sets this true to run this workflow as its release gate: beyond the PR
+      # checks, it installs the packaged app and re-runs e2e against the installed copy. Left
+      # false (the default), this is the ordinary, cheaper PR gate.
+      release:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      # Lets a maintainer run the heavier release-shaped gate by hand, without going through
+      # release.yml, e.g. to debug an install/uninstall failure in isolation.
+      release:
+        description: 'Also install the packaged app and re-run e2e against it, as a release gate would'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-# Keyed on the calling workflow too: when Release reuses this as its gate on a push to main,
-# it must not share (and cancel) the group of the ordinary CI run for that same push.
+# Keyed on the calling workflow too: when Release reuses this as its gate (via workflow_call,
+# triggered by a push to main), it must not share — and cancel — the group of a manual
+# workflow_dispatch run of CI itself against that same ref.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -32,6 +54,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # electron's postinstall (during npm ci, below) and electron-builder's packaging step
+      # both download large binaries from the network; caching them keyed on the lockfile
+      # skips that download whenever dependencies haven't changed. Must run before npm ci,
+      # since that's the step whose postinstall does the electron download.
+      - name: Cache Electron downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -42,40 +77,48 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           "version=$version" >> $env:GITHUB_OUTPUT
-      - name: End-to-end (unpackaged build, throwaway profile)
-        run: npm run e2e
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: e2e-windows-unpacked
-          path: e2e/out/
-          if-no-files-found: ignore
       - name: Package installers
         run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - uses: actions/upload-artifact@v7
+      - name: Packaging drift check
+        run: node e2e/drift.mjs release
+      - name: Copy app.asar out for the release gate's cross-platform drift check
+        if: inputs.release == true
+        # Only meaningful when this run is release.yml's gate: the release set uploaded below
+        # carries installers, never an unpacked tree, so the publish job's Windows-vs-Linux
+        # drift check (e2e/drift.mjs --require-cross-platform) would otherwise have nothing to
+        # compare. app-win.asar is not itself a release asset — publish's upload step uploads
+        # an explicit allowlist that leaves it out.
+        shell: pwsh
+        run: Copy-Item release/win-unpacked/resources/app.asar release/app-win.asar
+      - name: Upload release set
+        if: inputs.release == true
+        # Only when this is the release gate: release.yml's publish job downloads this by
+        # name (pattern: release-*) and expects exactly these files under dist/release-windows.
+        uses: actions/upload-artifact@v7
         with:
-          name: windows-installers
-          # release/*.blockmap and latest.yml are the NSIS update feed electron-updater
-          # polls for; surfacing them here means a broken feed shows up in PR CI, not only
-          # after a real release publish.
+          name: release-windows
+          # The NSIS blockmap and latest.yml are electron-updater's Windows update feed; they
+          # must ship alongside the installers or installed apps can never see this version.
           path: |
             release/*.exe
             release/*.blockmap
             release/latest.yml
+            release/app-win.asar
           if-no-files-found: error
-      - name: Packaging drift check
-        run: node e2e/drift.mjs release
+          retention-days: 3
       - name: End-to-end (packaged, win-unpacked exe)
         run: npm run e2e -- --app release/win-unpacked/Flowdo.exe
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: failure()
         with:
           name: e2e-windows-win-unpacked
           path: e2e/out/
           if-no-files-found: ignore
+          retention-days: 7
       - name: Silently install the NSIS installer
+        if: inputs.release == true
         # perMachine: false in electron-builder.yml means this is a per-user install, landing
         # in $env:LOCALAPPDATA\Programs\Flowdo — not a machine-wide Program Files install, and
         # not something `/S` needs admin rights for. -Wait is required: without it the e2e
@@ -90,14 +133,16 @@ jobs:
         run: |
           Start-Process -FilePath "release\Flowdo-Setup-${env:VERSION}.exe" -ArgumentList '/S' -Wait
       - name: End-to-end (installed app)
+        if: inputs.release == true
         shell: pwsh
         run: npm run e2e -- --app "$env:LOCALAPPDATA\Programs\Flowdo\Flowdo.exe"
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: inputs.release == true && failure()
         with:
           name: e2e-windows-installed
           path: e2e/out/
           if-no-files-found: ignore
+          retention-days: 7
       - name: End-to-end (portable exe) — not run
         # electron-builder's portable target is a self-extracting launcher: the process
         # Playwright would spawn immediately re-execs a *different*, freshly extracted
@@ -119,6 +164,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # electron's postinstall (during npm ci, below) and electron-builder's packaging step
+      # both download large binaries from the network; caching them keyed on the lockfile
+      # skips that download whenever dependencies haven't changed. Must run before npm ci,
+      # since that's the step whose postinstall does the electron download.
+      - name: Cache Electron downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
       # openbox gives e2e/xvfb-wm.sh a window manager under Xvfb, so minimize behaves the
       # same as it does on Windows; xvfb-run itself ships on the ubuntu-latest image already,
       # but is included here too in case that image assumption ever changes.
@@ -138,25 +196,35 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: End-to-end (unpackaged build, throwaway profile)
-        run: e2e/xvfb-wm.sh npm run e2e
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: e2e-linux-unpacked
-          path: e2e/out/
-          if-no-files-found: ignore
       - name: Package Linux packages
         run: npx electron-builder --linux --publish never
-      - uses: actions/upload-artifact@v7
+      - name: Packaging drift check
+        run: node e2e/drift.mjs release
+      - name: Copy app.asar out for the release gate's cross-platform drift check
+        if: inputs.release == true
+        # Same reasoning as the Windows job's equivalent step: only installers/packages are
+        # otherwise uploaded, so the publish job's cross-platform drift check would never find
+        # an asar to compare. Not itself a release asset — see the "Upload release set" step's
+        # explicit path allowlist.
+        run: cp release/linux-unpacked/resources/app.asar release/app-linux.asar
+      - name: Upload release set
+        if: inputs.release == true
+        # Only when this is the release gate: release.yml's publish job downloads this by
+        # name (pattern: release-*) and expects exactly these files under dist/release-linux.
+        uses: actions/upload-artifact@v7
         with:
-          name: linux-packages
+          name: release-linux
+          # latest-linux.yml is electron-updater's Linux (AppImage) update feed. The AppImage
+          # blockmap is only sometimes produced, so it's a best-effort glob rather than a
+          # required file.
           path: |
             release/*.AppImage
             release/*.deb
+            release/*.blockmap
+            release/latest-linux.yml
+            release/app-linux.asar
           if-no-files-found: error
-      - name: Packaging drift check
-        run: node e2e/drift.mjs release
+          retention-days: 3
       - name: Extract the AppImage
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -169,12 +237,14 @@ jobs:
       - name: End-to-end (extracted AppImage)
         run: e2e/xvfb-wm.sh npm run e2e -- --app "$RUNNER_TEMP/appimage/squashfs-root/flowdo"
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: failure()
         with:
           name: e2e-linux-appimage
           path: e2e/out/
           if-no-files-found: ignore
+          retention-days: 7
       - name: Install the deb package
+        if: inputs.release == true
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -182,16 +252,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y "./release/flowdo_${VERSION}_amd64.deb"
       - name: End-to-end (installed deb)
+        if: inputs.release == true
         run: e2e/xvfb-wm.sh npm run e2e -- --app /opt/Flowdo/flowdo
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: inputs.release == true && failure()
         with:
           name: e2e-linux-deb-installed
           path: e2e/out/
           if-no-files-found: ignore
+          retention-days: 7
       - name: Remove the deb package
+        if: inputs.release == true
         run: sudo apt-get remove -y flowdo
       - name: Assert the deb really uninstalled (/opt/Flowdo gone)
+        if: inputs.release == true
         run: |
           set -euo pipefail
           if [ -d /opt/Flowdo ]; then

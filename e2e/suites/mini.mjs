@@ -83,7 +83,8 @@ export async function run(ctx = {}) {
     // ── The widget's own close button ─────────────────────────────────────────
     await onMain(app, 'w.close()')
     shown = await waitFor(() => getMini(app))
-    const closeable = getMiniPage(app)
+    // Wait for the NEW widget's page, not whichever mini page is still listed; see getMiniPage.
+    const closeable = await waitFor(() => getMiniPage(app))
     check('mini widget opened to test its close button', !!shown && !!closeable)
     if (closeable) {
       await closeable.click('[aria-label="Close widget"]')

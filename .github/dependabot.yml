@@ -3,13 +3,12 @@ updates:
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
-      interval: 'weekly'
+      interval: 'monthly'
     open-pull-requests-limit: 5
     groups:
-      # Routine dev-tooling bumps (typecheck, test, build) land together; anything with a
-      # major version change or a production dependency still gets its own PR.
-      dev-dependencies:
-        dependency-type: 'development'
+      # All routine minor/patch bumps — dev tooling and production dependencies alike — land
+      # together in one PR; anything with a major version change still gets its own PR.
+      minor-and-patch:
         update-types: ['minor', 'patch']
     ignore:
       # electron-vite 5.0.0 (latest) peers vite ^5 || ^6 || ^7, and @vitejs/plugin-react 6
@@ -22,8 +21,10 @@ updates:
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
-      interval: 'weekly'
+      interval: 'monthly'
     open-pull-requests-limit: 5
     groups:
-      github-actions:
+      # All routine minor/patch action bumps land together in one PR; a major version change
+      # still gets its own PR.
+      minor-and-patch:
         update-types: ['minor', 'patch']

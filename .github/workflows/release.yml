@@ -1,18 +1,44 @@
 # Publishes a release when main carries a version that has no tag yet — bump package.json,
-# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the full CI gate again (which
-# itself runs the full e2e suite against every artefact and a same-platform drift check on
-# each platform's runner), installers for Windows and Linux (each carrying electron-updater's
-# update-feed file, latest.yml / latest-linux.yml, so installed apps can discover the new
-# version), a cross-platform drift check with both platforms' artefacts side by side, an
+# add docs/releases/vX.Y.Z.md, merge, and this does the rest: the CI workflow as a gate (with
+# `release: true`, so it also installs the packaged app and re-runs e2e against it on both
+# platforms, on top of everything an ordinary PR gate already does — including the packaging
+# drift check and the packaged-app e2e run, both against the *same* release/ output this job
+# then reuses), a cross-platform drift check with both platforms' artefacts side by side, an
 # annotated tag, and a GitHub Release with the notes and every artefact. Nothing is published
 # unless every check passes on this exact commit and every expected file is actually present
-# to upload.
+# to upload. Gate and publish share the gate's build instead of building the installers twice.
+#
+# workflow_dispatch also takes a `dry_run` input (default true): it runs the full gate and the
+# publish job's checks — download, expected-files, cross-platform drift — against a real build,
+# but stops short of tagging or publishing. Truth table (only workflow_dispatch has a dry_run
+# dimension; push to main never does):
+#
+#   event              | tagged? | dry_run | detect.needed | publish tags/releases?
+#   -------------------|---------|---------|----------------|------------------------
+#   push to main        | no      | (n/a)   | true           | yes — real release
+#   push to main        | yes     | (n/a)   | false          | n/a — gate/publish skipped
+#   workflow_dispatch   | no      | false   | true           | yes — real release
+#   workflow_dispatch   | no      | true    | true           | no — dry run only
+#   workflow_dispatch   | yes     | false   | false          | n/a — gate/publish skipped
+#   workflow_dispatch   | yes     | true    | true           | no — dry run only
+#
+# `github.event.inputs.dry_run` (and the `inputs` context) is unset on a push, so the
+# `inputs.dry_run == true` checks below are false by default for that event — a push can never
+# be treated as a dry run, and (via the `tagged` check ahead of the docs-file requirement) can
+# never re-publish an already-tagged version either. Only an explicit workflow_dispatch with
+# dry_run=true skips tagging, and only workflow_dispatch with dry_run=false (or the docs-file
+# requirement failing) can block a genuinely new version from publishing.
 name: Release
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run the gate and publish preflight without tagging or publishing'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -27,107 +53,70 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       needed: ${{ steps.v.outputs.needed }}
+      dry_run: ${{ steps.v.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: v
+        env:
+          # Only a manual workflow_dispatch run ever sets this; it's absent (falsy) for the
+          # push trigger, so a push can never be mistaken for a dry run. See the truth table
+          # in this file's header comment.
+          DRY_RUN: ${{ inputs.dry_run == true }}
         run: |
           version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+          tagged=false
           if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            tagged=true
+          fi
+          if [ "$tagged" = "true" ] && [ "$DRY_RUN" != "true" ]; then
             echo "v$version is already tagged; nothing to release."
             echo "needed=false" >> "$GITHUB_OUTPUT"
-          elif [ ! -f "docs/releases/v$version.md" ]; then
+            exit 0
+          fi
+          # Either a real release is due (untagged), or this is a dry run exercising the gate
+          # and publish preflight against an already-tagged version — both still need release
+          # notes, since the gate and the "expected files" / drift checks below are meant to
+          # reflect what a real release of this version would actually do.
+          if [ ! -f "docs/releases/v$version.md" ]; then
             echo "::error::package.json is at $version but docs/releases/v$version.md is missing. Release notes are required."
             exit 1
-          else
-            echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
+          if [ "$tagged" = "true" ]; then
+            echo "v$version is already tagged; dry_run=true was requested, so running the gate and publish preflight anyway without tagging or publishing."
+          fi
+          echo "needed=true" >> "$GITHUB_OUTPUT"
 
+  # Runs the same checks a PR gets, plus (release: true) installs the packaged app and re-runs
+  # e2e against it on both platforms — the one artefact shape a real release ships that PR CI
+  # doesn't re-prove on every push. Its windows and linux-suite jobs also produce this
+  # release's actual installers (release-windows / release-linux artifacts), which publish
+  # (below) downloads rather than building a second time.
   gate:
     needs: detect
     if: needs.detect.outputs.needed == 'true'
+    # Narrower than this workflow's own contents: write — the gate never tags or publishes,
+    # it only builds and tests. A reusable workflow call is capped at the intersection of the
+    # caller's grant and its own declared `permissions:` (ci.yml itself already declares
+    # contents: read), so this is belt-and-suspenders, not load-bearing, but it documents the
+    # intent at the call site too.
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
-
-  build-windows:
-    needs: [detect, gate]
-    if: needs.detect.outputs.needed == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Build installers
-        run: npm run build && npx electron-builder --win --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - name: Copy app.asar out for the cross-platform drift check
-        # This artefact only ever carries installers, never an unpacked tree, so the
-        # publish job's Windows-vs-Linux drift check (e2e/drift.mjs --require-cross-platform)
-        # would otherwise have nothing to compare. app-win.asar is not itself a release
-        # asset — the publish job's upload step uploads an explicit allowlist that leaves it
-        # out.
-        shell: pwsh
-        run: Copy-Item release/win-unpacked/resources/app.asar release/app-win.asar
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-windows
-          # The NSIS blockmap and latest.yml are electron-updater's Windows update feed;
-          # they must ship alongside the installers or installed apps can never see this
-          # version.
-          path: |
-            release/*.exe
-            release/*.blockmap
-            release/latest.yml
-            release/app-win.asar
-          if-no-files-found: error
-
-  build-linux:
-    needs: [detect, gate]
-    if: needs.detect.outputs.needed == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Build packages
-        run: npm run build && npx electron-builder --linux --publish never
-      - name: Copy app.asar out for the cross-platform drift check
-        # Same reasoning as build-windows's equivalent step: only installers/packages are
-        # otherwise uploaded, so the publish job's cross-platform drift check would never
-        # find an asar to compare. Not itself a release asset — see the publish job's
-        # explicit upload allowlist.
-        run: cp release/linux-unpacked/resources/app.asar release/app-linux.asar
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-linux
-          # latest-linux.yml is electron-updater's Linux (AppImage) update feed. The
-          # AppImage blockmap is only sometimes produced, so it's a best-effort glob rather
-          # than a required file.
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.blockmap
-            release/latest-linux.yml
-            release/app-linux.asar
-          if-no-files-found: error
+    with:
+      release: true
 
   publish:
-    needs: [detect, build-windows, build-linux]
+    needs: [detect, gate]
     if: needs.detect.outputs.needed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       VERSION: ${{ needs.detect.outputs.version }}
+      DRY_RUN: ${{ needs.detect.outputs.dry_run }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
@@ -175,8 +164,9 @@ jobs:
           # Persisted for the "Tag and publish" step below: it uploads exactly this verified
           # allowlist (plus any *.blockmap present) as release assets — never every file
           # under dist/release-*/, which now also holds the cross-platform drift check's
-          # app-win.asar / app-linux.asar helper files (build-windows / build-linux above),
-          # and which is not something anyone should be downloading from the release page.
+          # app-win.asar / app-linux.asar helper files (uploaded by ci.yml's windows /
+          # linux-suite jobs alongside the installers), and which is not something anyone
+          # should be downloading from the release page.
           printf '%s\n' "${expected[@]}" > "$RUNNER_TEMP/expected-assets.txt"
       - name: Packaging drift check (Windows vs Linux)
         # The gate (ci.yml, above, reused as `needs: gate` on every push) already ran the
@@ -185,10 +175,15 @@ jobs:
         # platforms' artefacts side by side — versions and asar contents must agree between
         # the Windows and Linux builds actually being published together as one release.
         # --require-cross-platform: this is the one run of drift.mjs where both platforms'
-        # artefacts are always expected side by side, so a missing comparison (e.g. a build
-        # job's app-*.asar copy step regressing) must FAIL here, not silently SKIP.
+        # artefacts are always expected side by side, so a missing comparison (e.g. ci.yml's
+        # app-*.asar copy step regressing) must FAIL here, not silently SKIP.
         run: node e2e/drift.mjs --require-cross-platform dist/release-windows dist/release-linux
+      - name: Dry run — not tagging or publishing
+        if: env.DRY_RUN == 'true'
+        run: |
+          echo "::notice::dry run: not tagging or publishing v$VERSION. Gate + publish preflight (download, expected-files, cross-platform drift) all passed."
       - name: Tag and publish
+        if: env.DRY_RUN != 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

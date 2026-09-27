@@ -147,6 +147,11 @@ Released 2026-09-25.
 - Sessions draw on top of calendar events instead of squeezed beside them.
 - Events are tinted with a left stripe; sessions stay solid, unmistakable even when colors overlap.
 
+### v0.5.3 — Sync now, one click
+
+- The Today view has a Sync now button in the header to pull Todoist and refresh calendar feeds in parallel, one click without opening Settings.
+- Faster CI/CD pipeline; a flaky mini-widget e2e check was fixed.
+
 ## Next
 
 v0.6 (data removal) and v1.0 (hardening) are paused after v0.5 until restarted.

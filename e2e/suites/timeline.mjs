@@ -31,6 +31,14 @@
  * all, or the feed still can't be added, the suite reports that and SKIPs the rest rather
  * than crashing — this is infrastructure bootstrapping, not something worth failing the run
  * over on a machine that genuinely has neither.
+ *
+ * Also covers the Today view's "Sync now" button (`components/tasks/SyncNowButton.tsx`):
+ * absent with no provider connected, present once the feed above makes calendars connected,
+ * absent again on Upcoming, and — the one behavioural check — that clicking it (never
+ * `calendars.refreshNow()` called directly, never a page reload) is what makes a feed body
+ * changed after the app already loaded actually show up in the Day timeline. That needs the
+ * feed server's body to change mid-run, which is why `startIcsServer` hands back a
+ * `setBody` rather than baking a fixed body into the request handler.
  */
 
 import { createServer } from 'node:http'
@@ -139,18 +147,31 @@ function buildIcs(events) {
   return lines.join('\r\n') + '\r\n'
 }
 
-/** A throwaway ICS feed server bound to 127.0.0.1 only — never 0.0.0.0 — serving the same
- *  fixed body to every request. */
-function startIcsServer(icsBody) {
+/**
+ * A throwaway ICS feed server bound to 127.0.0.1 only — never 0.0.0.0. Its body is mutable
+ * (a closure variable, not baked into the request handler) so the "Sync now" checks below
+ * can change what the feed serves and then re-fetch it, without standing up a second server.
+ * It never sends an ETag/Last-Modified, so main's conditional-GET path (see
+ * src/main/integrations/ical/fetch.ts) always re-parses the full body — exactly what makes
+ * a body swap + re-sync observable at all.
+ */
+function startIcsServer(initialBody) {
+  let body = initialBody
   return new Promise((resolvePromise, reject) => {
     const server = createServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8' })
-      res.end(icsBody)
+      res.end(body)
     })
     server.on('error', reject)
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address()
-      resolvePromise({ server, url: `http://127.0.0.1:${port}/feed.ics` })
+      resolvePromise({
+        server,
+        url: `http://127.0.0.1:${port}/feed.ics`,
+        setBody: (next) => {
+          body = next
+        }
+      })
     })
   })
 }
@@ -257,7 +278,7 @@ export async function run() {
       { uid: 'alpha', summary: ALPHA_TITLE, startMs: e1Start, endMs: e1End },
       { uid: 'beta', summary: BETA_TITLE, startMs: e2Start, endMs: e2End }
     ])
-    const { server, url: feedUrl } = await startIcsServer(icsBody)
+    const { server, url: feedUrl, setBody: setIcsBody } = await startIcsServer(icsBody)
     icsServer = server
 
     secretService = await startSecretService()
@@ -268,6 +289,18 @@ export async function run() {
     })
     app = launched.app
     const page = launched.page
+
+    // ── Sync now: absent before any feed exists ────────────────────────────────────────
+    // The app opens on the Focus screen with the Today smart view already selected (its
+    // store default — see `stores/tasks.ts`), and a fresh profile has neither Todoist
+    // connected nor any calendar feed, so this is the one point in the suite where the
+    // "no connected provider" case can be checked for free, before the feed below makes
+    // calendars connected for the rest of the run.
+    const syncNowAbsentInitially = !(await page.isVisible('[data-testid="sync-now"]'))
+    check(
+      '"Sync now" is absent from Today before any provider is connected',
+      syncNowAbsentInitially
+    )
 
     let feed = null
     let addError = null
@@ -288,6 +321,30 @@ export async function run() {
       )
       return results
     }
+
+    // ── Sync now: appears on Today once a feed is connected, absent on Upcoming ─────────
+    // `SyncNowButton` reads its providers once per mount rather than on every render (see
+    // its own header on why it isn't tied to `useIntegrationsStore`'s longer-lived
+    // lifecycle), and the instance that has been sitting on the Focus screen since launch
+    // mounted before the feed above existed. A real user adds a feed from Settings, not
+    // from the Today view itself, and comes back to Focus afterwards — so round-trip
+    // through another screen here too, rather than expecting that still-mounted instance
+    // to notice a feed added directly through the bridge underneath it.
+    await page.click('[aria-label="Settings"]')
+    await sleep(300)
+    await page.click('[aria-label="Focus"]')
+    await sleep(300)
+
+    const syncNowVisibleOnToday = await waitFor(() => page.isVisible('[data-testid="sync-now"]'), 3000)
+    check('Today view shows "Sync now" once a calendar feed is connected', syncNowVisibleOnToday)
+
+    await page.click('button:has-text("Upcoming")')
+    await sleep(300)
+    const syncNowAbsentOnUpcoming = !(await page.isVisible('[data-testid="sync-now"]'))
+    check('"Sync now" is absent from the Upcoming view', syncNowAbsentOnUpcoming)
+
+    await page.click('button:has-text("Today")')
+    await sleep(300)
 
     await logTinyFocusSession(page)
 
@@ -532,6 +589,66 @@ export async function run() {
     await sleep(500)
     await layeringChecks('week', 'dark')
     await screenshot('week', 'dark')
+
+    // ── Sync now: clicking it actually pulls a new calendar event ───────────────────────
+    // Swaps the feed's served body for one with a fourth event (gamma/alpha/beta stay, so
+    // the checks above are undisturbed by this running afterwards), then relies on "Sync
+    // now" ALONE — never `calendars.refreshNow()` called directly, never a page reload —
+    // to make it show up in the Day timeline.
+    const DELTA_TITLE = 'Timeline E2E Delta'
+    const deltaStart = now + 5 * MINUTE
+    const deltaEnd = now + 20 * MINUTE
+    setIcsBody(
+      buildIcs([
+        { uid: 'gamma', summary: GAMMA_TITLE, startMs: e3Start, endMs: e3End },
+        { uid: 'alpha', summary: ALPHA_TITLE, startMs: e1Start, endMs: e1End },
+        { uid: 'beta', summary: BETA_TITLE, startMs: e2Start, endMs: e2End },
+        { uid: 'delta', summary: DELTA_TITLE, startMs: deltaStart, endMs: deltaEnd }
+      ])
+    )
+
+    await page.click('[aria-label="Focus"]')
+    await sleep(400)
+    await page.click('button:has-text("Today")')
+    await sleep(300)
+
+    const syncButtonVisible = await page.isVisible('[data-testid="sync-now"]')
+    check('"Sync now" is available on Today to trigger the check below', syncButtonVisible)
+
+    if (syncButtonVisible) {
+      await page.click('[data-testid="sync-now"]')
+      const wentIdle = await waitFor(async () => {
+        const busy = await page.getAttribute('[data-testid="sync-now"]', 'aria-busy')
+        return busy === 'false'
+      }, 8000)
+      check('"Sync now" returns to idle (aria-busy="false") after a click', wentIdle)
+
+      await page.click('[aria-label="Calendar"]')
+      await sleep(500)
+      await page.click('role=radio[name="Day"]')
+      await sleep(500)
+      const deltaSel = sel(DELTA_TITLE)
+      const deltaVisible = await waitFor(async () => {
+        await page.locator(deltaSel).scrollIntoViewIfNeeded().catch(() => {})
+        return page.isVisible(deltaSel)
+      }, 4000)
+      check(
+        'the event added via "Sync now" (not a page reload) appears in the Day timeline',
+        deltaVisible
+      )
+    }
+
+    // ── Sync now: screenshots ────────────────────────────────────────────────────────────
+    await page.click('[aria-label="Focus"]')
+    await sleep(300)
+    await page.click('button:has-text("Today")')
+    await sleep(300)
+    await page.evaluate(() => window.flowdo.settings.set({ theme: 'light' }))
+    await sleep(300)
+    await page.screenshot({ path: join(outDir, 'today-sync-light.png') })
+    await page.evaluate(() => window.flowdo.settings.set({ theme: 'dark' }))
+    await sleep(300)
+    await page.screenshot({ path: join(outDir, 'today-sync-dark.png') })
 
     // ── restore ─────────────────────────────────────────────────────────────────────────
     await page.evaluate(() => window.flowdo.settings.set({ theme: 'system' }))
